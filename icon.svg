@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- 고급스러운 딥 네이비 & 골드 우드 앱 배경 -->
+    <linearGradient id="appBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- 따뜻한 바둑판 나무 그라데이션 -->
+    <linearGradient id="woodBoard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f6d38b" />
+      <stop offset="50%" stop-color="#e3b15a" />
+      <stop offset="100%" stop-color="#c48a32" />
+    </linearGradient>
+
+    <!-- 입체 흑돌 그라데이션 -->
+    <radialGradient id="blackStone" cx="32%" cy="28%" r="68%">
+      <stop offset="0%" stop-color="#64748b" />
+      <stop offset="28%" stop-color="#1e293b" />
+      <stop offset="75%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#000000" />
+    </radialGradient>
+
+    <!-- 입체 백돌 그라데이션 -->
+    <radialGradient id="whiteStone" cx="32%" cy="28%" r="68%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="55%" stop-color="#f1f5f9" />
+      <stop offset="85%" stop-color="#cbd5e1" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </radialGradient>
+
+    <!-- 황금 왕관 그라데이션 -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+
+    <filter id="dropShadow" x="-15%" y="-15%" width="135%" height="135%">
+      <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <filter id="stoneShadow" x="-20%" y="-20%" width="145%" height="145%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#451a03" flood-opacity="0.45" />
+    </filter>
+  </defs>
+
+  <!-- 외곽 라운드 스퀘어 아이콘 베이스 -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#appBg)" stroke="#fbbf24" stroke-width="8" />
+  <ellipse cx="256" cy="90" rx="190" ry="50" fill="#ffffff" opacity="0.08" />
+
+  <!-- 내부 오목 나무판 -->
+  <g filter="url(#dropShadow)">
+    <rect x="58" y="64" width="396" height="336" rx="44" fill="url(#woodBoard)" stroke="#78350f" stroke-width="8" />
+    <rect x="74" y="80" width="364" height="304" rx="30" fill="none" stroke="#92400e" stroke-width="2.5" opacity="0.45" />
+  </g>
+
+  <!-- 바둑판 격자선 -->
+  <g stroke="#78350f" stroke-width="4" opacity="0.72" stroke-linecap="round">
+    <line x1="96" y1="124" x2="416" y2="124" />
+    <line x1="96" y1="178" x2="416" y2="178" />
+    <line x1="96" y1="232" x2="416" y2="232" />
+    <line x1="96" y1="286" x2="416" y2="286" />
+    <line x1="96" y1="340" x2="416" y2="340" />
+
+    <line x1="136" y1="92" x2="136" y2="372" />
+    <line x1="196" y1="92" x2="196" y2="372" />
+    <line x1="256" y1="92" x2="256" y2="372" />
+    <line x1="316" y1="92" x2="316" y2="372" />
+    <line x1="376" y1="92" x2="376" y2="372" />
+  </g>
+
+  <!-- 화점 (Star points) -->
+  <g fill="#78350f">
+    <circle cx="196" cy="178" r="6" />
+    <circle cx="316" cy="178" r="6" />
+    <circle cx="256" cy="232" r="7" />
+    <circle cx="196" cy="286" r="6" />
+    <circle cx="316" cy="286" r="6" />
+  </g>
+
+  <!-- 배경 장식용 작은 바둑돌 2개 -->
+  <g filter="url(#stoneShadow)">
+    <circle cx="136" cy="124" r="24" fill="url(#blackStone)" />
+    <circle cx="376" cy="340" r="24" fill="url(#whiteStone)" />
+  </g>
+
+  <!-- 5목 승리 금빛 광선 -->
+  <line x1="124" y1="298" x2="388" y2="166" stroke="#fef08a" stroke-width="10" stroke-linecap="round" opacity="0.85" />
+
+  <!-- 메인 귀여운 흑돌 캐릭터 (좌측 중앙) -->
+  <g transform="translate(178, 224)" filter="url(#stoneShadow)">
+    <circle cx="0" cy="0" r="64" fill="url(#blackStone)" stroke="#0f172a" stroke-width="4" />
+    <!-- 광택 -->
+    <ellipse cx="-20" cy="-28" rx="22" ry="12" transform="rotate(-22 -20 -28)" fill="#ffffff" opacity="0.28" />
+    <!-- 초롱초롱한 눈 -->
+    <circle cx="-20" cy="-2" r="8.5" fill="#ffffff" />
+    <circle cx="-18" cy="-4" r="4" fill="#38bdf8" />
+    <circle cx="20" cy="-2" r="8.5" fill="#ffffff" />
+    <circle cx="22" cy="-4" r="4" fill="#38bdf8" />
+    <!-- 귀여운 볼터치와 미소 -->
+    <ellipse cx="-33" cy="10" rx="9" ry="5" fill="#fb7185" opacity="0.8" />
+    <ellipse cx="33" cy="10" rx="9" ry="5" fill="#fb7185" opacity="0.8" />
+    <path d="M-12 12 Q0 24 12 12" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" />
+  </g>
+
+  <!-- 메인 귀여운 백돌 캐릭터 (우측 중앙) -->
+  <g transform="translate(324, 240)" filter="url(#stoneShadow)">
+    <circle cx="0" cy="0" r="62" fill="url(#whiteStone)" stroke="#cbd5e1" stroke-width="4" />
+    <!-- 광택 -->
+    <ellipse cx="-18" cy="-26" rx="20" ry="11" transform="rotate(-20 -18 -26)" fill="#ffffff" opacity="0.9" />
+    <!-- 초롱초롱한 눈 -->
+    <circle cx="-19" cy="-2" r="8" fill="#0f172a" />
+    <circle cx="-21" cy="-5" r="3" fill="#ffffff" />
+    <circle cx="19" cy="-2" r="8" fill="#0f172a" />
+    <circle cx="17" cy="-5" r="3" fill="#ffffff" />
+    <!-- 볼터치와 미소 -->
+    <ellipse cx="-32" cy="10" rx="9" ry="5" fill="#f43f5e" opacity="0.65" />
+    <ellipse cx="32" cy="10" rx="9" ry="5" fill="#f43f5e" opacity="0.65" />
+    <path d="M-11 12 Q0 23 11 12" fill="none" stroke="#0f172a" stroke-width="4.5" stroke-linecap="round" />
+  </g>
+
+  <!-- 상단 골드 크라운 & 5성 장식 -->
+  <g filter="url(#dropShadow)">
+    <path d="M204 126 L224 84 L256 110 L288 84 L308 126 Z" fill="url(#goldGrad)" stroke="#78350f" stroke-width="5" stroke-linejoin="round" />
+    <circle cx="224" cy="78" r="7" fill="#fef08a" stroke="#78350f" stroke-width="3" />
+    <circle cx="256" cy="72" r="9" fill="#ef4444" stroke="#78350f" stroke-width="3" />
+    <circle cx="288" cy="78" r="7" fill="#fef08a" stroke="#78350f" stroke-width="3" />
+  </g>
+
+  <!-- 하단 OMOK 타이틀 배지 -->
+  <g filter="url(#dropShadow)">
+    <rect x="132" y="416" width="248" height="54" rx="27" fill="url(#goldGrad)" stroke="#ffffff" stroke-width="5" />
+    <text x="256" y="453" text-anchor="middle" font-family="'Arial Black', 'Segoe UI', sans-serif" font-weight="900" font-size="33" letter-spacing="3" fill="#0f172a">OMOK</text>
+  </g>
+</svg>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="OMOK" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="Shortcut Icon" href="favicon.ico" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>OMOK - Single &amp; Multi</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="game-container">
+
+    <!-- ==========================================
+         GLOBAL TOP SCORE HEADER
+         Left: OPP W / L / D / RATE%
+         Right: ME W / L / D / RATE%
+         ========================================== -->
+    <header class="top-score-header">
+      <!-- Left: Opponent Record -->
+      <div class="score-card opp-score-card" id="header-opp-box">
+        <div class="score-card-top">
+          <span class="stone-dot" id="opp-stone-dot">⚪</span>
+          <span class="score-role-name" id="opp-header-name">OPP</span>
+        </div>
+        <div class="score-metrics">
+          <span class="m-chip win">W <strong id="opp-stat-w">0</strong></span>
+          <span class="m-chip lose">L <strong id="opp-stat-l">0</strong></span>
+          <span class="m-chip draw">D <strong id="opp-stat-d">0</strong></span>
+          <span class="m-chip rate"><strong id="opp-stat-r">0%</strong></span>
+        </div>
+      </div>
+
+      <!-- Center: Mini Brand & Controls -->
+      <div class="header-center-tools">
+        <div class="brand-mini">
+          <img src="icon-192.png" onerror="this.onerror=null;this.src='icon.svg';" alt="OMOK" class="brand-mini-icon" />
+          <span class="brand-mini-text">OMOK</span>
+        </div>
+        <div class="tool-btn-row">
+          <button id="btn-sound-toggle" class="icon-tool-btn sound-on" type="button" title="Sound">🔊</button>
+          <button id="btn-reset-stats" class="icon-tool-btn" type="button" title="Reset Stats">↺</button>
+          <button id="btn-open-install" class="icon-tool-btn install-chip hidden" type="button" title="Install App">📲</button>
+        </div>
+      </div>
+
+      <!-- Right: My Record -->
+      <div class="score-card my-score-card" id="header-my-box">
+        <div class="score-card-top my-top">
+          <span class="score-role-name" id="my-header-name">ME</span>
+          <span class="stone-dot" id="my-stone-dot">⚫</span>
+        </div>
+        <div class="score-metrics my-metrics">
+          <span class="m-chip win">W <strong id="my-stat-w">0</strong></span>
+          <span class="m-chip lose">L <strong id="my-stat-l">0</strong></span>
+          <span class="m-chip draw">D <strong id="my-stat-d">0</strong></span>
+          <span class="m-chip rate"><strong id="my-stat-r">0%</strong></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ==========================================
+         1. HOME MENU SCREEN (SINGLE vs AI / MULTI LOBBY)
+         ========================================== -->
+    <section id="screen-menu" class="screen-view">
+      <div class="menu-body">
+        <div class="hero-card">
+          <img src="icon-192.png" onerror="this.onerror=null;this.src='icon.svg';" alt="OMOK" class="hero-logo" />
+          <h1 class="hero-title">OMOK</h1>
+          <p class="hero-sub">5 IN A ROW</p>
+        </div>
+
+        <div class="name-input-pill">
+          <span class="name-label">👤 ID</span>
+          <input id="input-nickname" type="text" maxlength="10" placeholder="PLAYER" value="PLAYER" />
+        </div>
+
+        <div class="mode-grid">
+          <!-- SINGLE PLAY -->
+          <button id="btn-mode-single" class="mode-card single-mode" type="button">
+            <div class="mode-art">🤖</div>
+            <div class="mode-name">SINGLE</div>
+            <div class="mode-sub">VS AI</div>
+            <div class="mode-go">PLAY ▶</div>
+          </button>
+
+          <!-- MULTI PLAY -->
+          <button id="btn-mode-multi" class="mode-card multi-mode" type="button">
+            <div class="mode-art">🌐</div>
+            <div class="mode-name">MULTI</div>
+            <div class="mode-sub">LOBBY</div>
+            <div class="mode-go multi-go">JOIN ▶</div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         2. MULTIPLAY LOBBY SCREEN (Simple & Clean)
+         ========================================== -->
+    <section id="screen-lobby" class="screen-view hidden">
+      <div class="sub-bar">
+        <button id="btn-lobby-back" class="btn-pill" type="button">◀ HOME</button>
+        <div class="sub-bar-center">
+          <span class="badge-tag">🌐 LOBBY</span>
+          <span id="ws-status-badge" class="ws-pill connecting">•••</span>
+        </div>
+        <button id="btn-refresh-rooms" class="btn-pill" type="button">🔄</button>
+      </div>
+
+      <div class="lobby-content">
+        <div class="create-room-row">
+          <input id="input-room-title" type="text" maxlength="18" class="room-input" placeholder="ROOM NAME..." />
+          <button id="btn-create-room" class="btn-create" type="button">＋ CREATE</button>
+        </div>
+
+        <div class="room-list-box">
+          <div class="room-list-head">
+            <span>ROOMS</span>
+            <span id="room-count-text" class="room-cnt">0</span>
+          </div>
+          <div id="room-list-container" class="room-list">
+            <div class="empty-rooms">NO ROOMS — TAP [＋ CREATE]</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         3. GAME BOARD SCREEN (15x15 Omok Board)
+         ========================================== -->
+    <section id="screen-game" class="screen-view hidden">
+      <div class="sub-bar game-sub-bar">
+        <button id="btn-leave-game" class="btn-pill" type="button">◀ EXIT</button>
+        <div class="turn-banner" id="turn-banner">
+          <span id="turn-stone-icon">⚫</span>
+          <span id="turn-status-text">YOUR TURN</span>
+        </div>
+        <button id="btn-new-game" class="btn-pill" type="button">🔄 NEW</button>
+      </div>
+
+      <div class="board-stage">
+        <div class="board-wrapper">
+          <canvas id="omok-canvas" width="600" height="600"></canvas>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ==========================================
+       MATCH OVER MODAL
+       ========================================== -->
+  <div id="gameover-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div id="modal-badge" class="modal-badge win">WIN</div>
+      <h2 id="modal-title" class="modal-title">🏆 YOU WIN!</h2>
+      <p id="modal-sub" class="modal-sub">5 IN A ROW</p>
+
+      <div class="modal-btn-row">
+        <button id="btn-play-again" class="btn-modal-primary" type="button">🔄 AGAIN</button>
+        <button id="btn-modal-leave" class="btn-modal-secondary" type="button">🚪 EXIT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       FIRST VISIT DESKTOP / HOME SCREEN SHORTCUT MODAL
+       ========================================== -->
+  <div id="install-modal" class="modal-backdrop center-modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card install-card">
+      <div class="install-icon-box">
+        <img src="icon-192.png" onerror="this.onerror=null;this.src='icon.svg';" alt="OMOK" class="install-icon-img" />
+      </div>
+      <div class="modal-badge win">SHORTCUT</div>
+      <h2 class="modal-title">INSTALL OMOK ICON?</h2>
+      <p id="install-desc" class="modal-sub">
+        Add the pretty OMOK shortcut icon to your Windows Desktop or Android Home Screen?
+      </p>
+
+      <div id="install-guide-box" class="install-guide hidden"></div>
+
+      <div class="modal-btn-row">
+        <button id="btn-install-confirm" class="btn-modal-primary" type="button">✨ INSTALL</button>
+        <button id="btn-install-later" class="btn-modal-secondary" type="button">LATER</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
