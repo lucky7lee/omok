@@ -3,6 +3,7 @@
 // ==========================================
 
 const BOARD_SIZE = 15;
+const TURN_LIMIT_SEC = 30;
 const STAR_POINTS = [
   [3, 3],
   [3, 11],
@@ -20,6 +21,7 @@ const state = {
   myColor: 1, // 1 = Black, 2 = White
   oppColor: 2,
   turnColor: 1,
+  turnSecondsLeft: TURN_LIMIT_SEC,
 
   board: createEmptyBoard(),
   moveCount: 0,
@@ -43,15 +45,92 @@ const state = {
 };
 
 let aiTimerId = null;
+let turnTimerIntervalId = null;
 
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
+}
+
+function getRandomEmptyCell(board) {
+  const empty = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) empty.push({ r, c });
+    }
+  }
+  if (empty.length === 0) return null;
+  return empty[Math.floor(Math.random() * empty.length)];
 }
 
 function clearAiTimer() {
   if (aiTimerId) {
     clearTimeout(aiTimerId);
     aiTimerId = null;
+  }
+}
+
+function clearTurnCountdown() {
+  if (turnTimerIntervalId) {
+    clearInterval(turnTimerIntervalId);
+    turnTimerIntervalId = null;
+  }
+}
+
+function startTurnCountdown() {
+  clearTurnCountdown();
+  state.turnSecondsLeft = TURN_LIMIT_SEC;
+  renderTurnTimerBadge();
+
+  if (state.screen !== 'game' || state.isGameOver || state.isWaitingOpponent) {
+    return;
+  }
+
+  turnTimerIntervalId = setInterval(() => {
+    if (state.screen !== 'game' || state.isGameOver || state.isWaitingOpponent) {
+      clearTurnCountdown();
+      renderTurnTimerBadge();
+      return;
+    }
+
+    state.turnSecondsLeft = Math.max(0, state.turnSecondsLeft - 1);
+    renderTurnTimerBadge();
+
+    if (state.turnSecondsLeft <= 5 && state.turnSecondsLeft > 0 && state.turnColor === state.myColor) {
+      playTickWarningSound();
+    }
+
+    if (state.turnSecondsLeft <= 0) {
+      clearTurnCountdown();
+      handleTurnTimeoutAutoPlace();
+    }
+  }, 1000);
+}
+
+function renderTurnTimerBadge() {
+  const badge = document.getElementById('turn-timer-badge');
+  if (!badge) return;
+  if (state.isWaitingOpponent || state.isGameOver) {
+    badge.classList.add('hidden');
+    badge.classList.remove('urgent');
+    return;
+  }
+  badge.classList.remove('hidden');
+  badge.textContent = `${state.turnSecondsLeft}s`;
+  badge.classList.toggle('urgent', state.turnSecondsLeft <= 5);
+}
+
+function handleTurnTimeoutAutoPlace() {
+  if (state.isGameOver || state.isWaitingOpponent) return;
+
+  // When it is my turn and 30 seconds have elapsed, place randomly at any empty spot
+  if (state.turnColor === state.myColor) {
+    const cell = getRandomEmptyCell(state.board);
+    if (!cell) return;
+    if (state.mode === 'single') {
+      applySinglePlayMove(cell.r, cell.c, state.myColor);
+    } else {
+      wsSend({ type: 'place_stone', r: cell.r, c: cell.c });
+    }
   }
 }
 
@@ -175,6 +254,23 @@ function playMatchSound(type) {
   }
 }
 
+function playTickWarningSound() {
+  if (!state.soundEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, now);
+  gain.gain.setValueAtTime(0.08, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.065);
+}
+
 // ==========================================
 // Stats Persistence & Top Score Header UI
 // ==========================================
@@ -293,6 +389,10 @@ function updateTurnBannerUI() {
 
 function showScreen(screenName) {
   state.screen = screenName;
+  if (screenName !== 'game') {
+    clearTurnCountdown();
+    clearAiTimer();
+  }
   document.getElementById('screen-menu').classList.toggle('hidden', screenName !== 'menu');
   document.getElementById('screen-lobby').classList.toggle('hidden', screenName !== 'lobby');
   document.getElementById('screen-game').classList.toggle('hidden', screenName !== 'game');
@@ -689,6 +789,7 @@ function startSinglePlayGame(swapFirst = false) {
   showScreen('game');
   updateTurnBannerUI();
   updateTopScoreHeader();
+  startTurnCountdown();
   drawOmokBoard();
 
   if (state.turnColor === state.oppColor) {
@@ -708,6 +809,7 @@ function scheduleAiTurn() {
 function applySinglePlayMove(r, c, color) {
   if (state.isGameOver || state.board[r][c] !== 0) return;
 
+  clearTurnCountdown();
   state.board[r][c] = color;
   state.moveCount += 1;
   state.lastMove = { r, c, color };
@@ -717,6 +819,7 @@ function applySinglePlayMove(r, c, color) {
   if (winLine) {
     state.winLine = winLine;
     state.isGameOver = true;
+    renderTurnTimerBadge();
     drawOmokBoard();
 
     const didIWin = color === state.myColor;
@@ -736,6 +839,7 @@ function applySinglePlayMove(r, c, color) {
 
   if (state.moveCount >= BOARD_SIZE * BOARD_SIZE) {
     state.isGameOver = true;
+    renderTurnTimerBadge();
     drawOmokBoard();
     state.stats.single.me.draws += 1;
     state.stats.single.ai.draws += 1;
@@ -747,6 +851,7 @@ function applySinglePlayMove(r, c, color) {
   state.turnColor = color === 1 ? 2 : 1;
   updateTurnBannerUI();
   updateTopScoreHeader();
+  startTurnCountdown();
   drawOmokBoard();
 
   if (state.turnColor === state.oppColor) {
@@ -1038,8 +1143,130 @@ function announceHostedRoom() {
   });
 }
 
+function clearHostedRoomTurnTimer() {
+  if (hostedRoom && hostedRoom.turnTimer) {
+    clearTimeout(hostedRoom.turnTimer);
+    hostedRoom.turnTimer = null;
+  }
+}
+
+function scheduleHostedRoomTurnTimer() {
+  clearHostedRoomTurnTimer();
+  if (!hostedRoom || hostedRoom.status !== 'playing' || hostedRoom.players.length < 2) return;
+  hostedRoom.turnTimer = setTimeout(() => {
+    if (!hostedRoom || hostedRoom.status !== 'playing' || hostedRoom.players.length < 2) return;
+    const cell = getRandomEmptyCell(hostedRoom.board);
+    if (!cell) return;
+    executeHostedRoomMove(hostedRoom.turnColor, cell.r, cell.c);
+  }, TURN_LIMIT_SEC * 1000 + 400);
+}
+
+function executeHostedRoomMove(moveColor, r, c) {
+  if (!hostedRoom || hostedRoom.status !== 'playing' || hostedRoom.players.length < 2) return;
+  if (hostedRoom.board[r][c] !== 0) return;
+
+  clearHostedRoomTurnTimer();
+  hostedRoom.board[r][c] = moveColor;
+  hostedRoom.moveCount += 1;
+  hostedRoom.lastMove = { r, c, color: moveColor };
+
+  const pIdx = moveColor === 1 ? hostedRoom.blackIndex : (hostedRoom.blackIndex === 0 ? 1 : 0);
+  const oppIdx = pIdx === 0 ? 1 : 0;
+
+  const winLine = checkFiveWin(hostedRoom.board, r, c, moveColor);
+  if (winLine) {
+    hostedRoom.status = 'finished';
+    hostedRoom.winLine = winLine;
+    const winner = hostedRoom.players[pIdx];
+    const loser = hostedRoom.players[oppIdx];
+    winner.stats.wins += 1;
+    loser.stats.losses += 1;
+
+    for (const p of hostedRoom.players) {
+      sendToPeer(p.id, {
+        type: 'stone_placed',
+        r,
+        c,
+        color: moveColor,
+        turnColor: hostedRoom.turnColor,
+        winLine
+      });
+    }
+    sendToPeer(winner.id, {
+      type: 'match_over',
+      result: 'win',
+      winnerColor: moveColor,
+      winLine,
+      meStats: winner.stats,
+      oppStats: loser.stats
+    });
+    sendToPeer(loser.id, {
+      type: 'match_over',
+      result: 'lose',
+      winnerColor: moveColor,
+      winLine,
+      meStats: loser.stats,
+      oppStats: winner.stats
+    });
+    announceHostedRoom();
+    return;
+  }
+
+  if (hostedRoom.moveCount >= BOARD_SIZE * BOARD_SIZE) {
+    hostedRoom.status = 'finished';
+    const p1 = hostedRoom.players[0];
+    const p2 = hostedRoom.players[1];
+    p1.stats.draws += 1;
+    p2.stats.draws += 1;
+
+    for (const p of hostedRoom.players) {
+      sendToPeer(p.id, {
+        type: 'stone_placed',
+        r,
+        c,
+        color: moveColor,
+        turnColor: hostedRoom.turnColor,
+        winLine: null
+      });
+    }
+    sendToPeer(p1.id, {
+      type: 'match_over',
+      result: 'draw',
+      winnerColor: 0,
+      winLine: null,
+      meStats: p1.stats,
+      oppStats: p2.stats
+    });
+    sendToPeer(p2.id, {
+      type: 'match_over',
+      result: 'draw',
+      winnerColor: 0,
+      winLine: null,
+      meStats: p2.stats,
+      oppStats: p1.stats
+    });
+    announceHostedRoom();
+    return;
+  }
+
+  hostedRoom.turnColor = moveColor === 1 ? 2 : 1;
+  scheduleHostedRoomTurnTimer();
+
+  for (const p of hostedRoom.players) {
+    sendToPeer(p.id, {
+      type: 'stone_placed',
+      r,
+      c,
+      color: moveColor,
+      turnColor: hostedRoom.turnColor,
+      winLine: null
+    });
+  }
+}
+
 function resetHostedRoomMatch(swapFirst = false) {
   if (!hostedRoom) return;
+  clearHostedRoomTurnTimer();
   hostedRoom.board = createEmptyBoard();
   hostedRoom.moveCount = 0;
   hostedRoom.lastMove = null;
@@ -1051,6 +1278,9 @@ function resetHostedRoomMatch(swapFirst = false) {
   }
   hostedRoom.turnColor = 1;
   hostedRoom.status = hostedRoom.players.length === 2 ? 'playing' : 'waiting';
+  if (hostedRoom.status === 'playing') {
+    scheduleHostedRoomTurnTimer();
+  }
 }
 
 function broadcastHostedRoomState() {
@@ -1157,98 +1387,7 @@ function handleHostPeerCommand(data) {
       return;
     }
 
-    hostedRoom.board[r][c] = myColor;
-    hostedRoom.moveCount += 1;
-    hostedRoom.lastMove = { r, c, color: myColor };
-
-    const winLine = checkFiveWin(hostedRoom.board, r, c, myColor);
-    if (winLine) {
-      hostedRoom.status = 'finished';
-      hostedRoom.winLine = winLine;
-      const oppIdx = pIdx === 0 ? 1 : 0;
-      const winner = hostedRoom.players[pIdx];
-      const loser = hostedRoom.players[oppIdx];
-      winner.stats.wins += 1;
-      loser.stats.losses += 1;
-
-      for (const p of hostedRoom.players) {
-        sendToPeer(p.id, {
-          type: 'stone_placed',
-          r,
-          c,
-          color: myColor,
-          turnColor: hostedRoom.turnColor,
-          winLine
-        });
-      }
-      sendToPeer(winner.id, {
-        type: 'match_over',
-        result: 'win',
-        winnerColor: myColor,
-        winLine,
-        meStats: winner.stats,
-        oppStats: loser.stats
-      });
-      sendToPeer(loser.id, {
-        type: 'match_over',
-        result: 'lose',
-        winnerColor: myColor,
-        winLine,
-        meStats: loser.stats,
-        oppStats: winner.stats
-      });
-      announceHostedRoom();
-      return;
-    }
-
-    if (hostedRoom.moveCount >= BOARD_SIZE * BOARD_SIZE) {
-      hostedRoom.status = 'finished';
-      const p1 = hostedRoom.players[0];
-      const p2 = hostedRoom.players[1];
-      p1.stats.draws += 1;
-      p2.stats.draws += 1;
-
-      for (const p of hostedRoom.players) {
-        sendToPeer(p.id, {
-          type: 'stone_placed',
-          r,
-          c,
-          color: myColor,
-          turnColor: hostedRoom.turnColor,
-          winLine: null
-        });
-      }
-      sendToPeer(p1.id, {
-        type: 'match_over',
-        result: 'draw',
-        winnerColor: 0,
-        winLine: null,
-        meStats: p1.stats,
-        oppStats: p2.stats
-      });
-      sendToPeer(p2.id, {
-        type: 'match_over',
-        result: 'draw',
-        winnerColor: 0,
-        winLine: null,
-        meStats: p2.stats,
-        oppStats: p1.stats
-      });
-      announceHostedRoom();
-      return;
-    }
-
-    hostedRoom.turnColor = myColor === 1 ? 2 : 1;
-    for (const p of hostedRoom.players) {
-      sendToPeer(p.id, {
-        type: 'stone_placed',
-        r,
-        c,
-        color: myColor,
-        turnColor: hostedRoom.turnColor,
-        winLine: null
-      });
-    }
+    executeHostedRoomMove(myColor, r, c);
   } else if (data.cmd === 'play_again') {
     if (hostedRoom.players.length < 2) return;
     resetHostedRoomMatch(true);
@@ -1353,6 +1492,7 @@ function wsSend(obj) {
 
     case 'leave_room':
       if (hostedRoom) {
+        clearHostedRoomTurnTimer();
         if (hostAnnounceInterval) clearInterval(hostAnnounceInterval);
         const guest = hostedRoom.players.find((p) => p.id !== myClientId);
         if (guest) {
@@ -1510,6 +1650,7 @@ function handleMultiplayerRoomUpdate(room) {
 
   updateTurnBannerUI();
   updateTopScoreHeader();
+  startTurnCountdown();
   drawOmokBoard();
 }
 
@@ -1522,10 +1663,14 @@ function handleMultiplayerStonePlaced(msg) {
   playStonePlaceSound(msg.color === 1);
   updateTurnBannerUI();
   updateTopScoreHeader();
+  if (!msg.winLine && !state.isGameOver) {
+    startTurnCountdown();
+  }
   drawOmokBoard();
 }
 
 function handleMultiplayerMatchOver(msg) {
+  clearTurnCountdown();
   state.isGameOver = true;
   if (msg.winLine) state.winLine = msg.winLine;
 
@@ -1533,6 +1678,7 @@ function handleMultiplayerMatchOver(msg) {
   if (msg.oppStats) state.stats.multi.opp = sanitizeRecord(msg.oppStats);
   saveStatsData();
 
+  renderTurnTimerBadge();
   updateTurnBannerUI();
   drawOmokBoard();
 

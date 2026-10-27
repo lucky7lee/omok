@@ -617,6 +617,28 @@ button {
   background: linear-gradient(135deg, #d97706, #b45309);
 }
 
+.turn-timer-badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: #fde047;
+  min-width: 34px;
+  text-align: center;
+}
+
+.turn-timer-badge.urgent {
+  background: #ef4444;
+  color: #ffffff;
+  animation: timerPulse 0.5s infinite alternate;
+}
+
+@keyframes timerPulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.1); }
+}
+
 .board-stage {
   flex: 1;
   display: flex;

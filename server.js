@@ -12,6 +12,7 @@ const { execFile } = require('child_process');
 
 const PORT = process.env.PORT || 3010;
 const BOARD_SIZE = 15;
+const TURN_LIMIT_MS = 30000;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -344,6 +345,143 @@ function checkFiveWin(board, r, c, color) {
   return null;
 }
 
+function getRandomEmptyCell(board) {
+  const empty = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) empty.push({ r, c });
+    }
+  }
+  if (empty.length === 0) return null;
+  return empty[Math.floor(Math.random() * empty.length)];
+}
+
+function clearRoomTurnTimer(room) {
+  if (room && room.turnTimer) {
+    clearTimeout(room.turnTimer);
+    room.turnTimer = null;
+  }
+}
+
+function scheduleRoomTurnTimer(room) {
+  clearRoomTurnTimer(room);
+  if (!room || room.status !== 'playing' || room.players.length < 2) return;
+  room.turnDeadline = Date.now() + TURN_LIMIT_MS;
+  room.turnTimer = setTimeout(() => {
+    if (!rooms.has(room.id) || room.status !== 'playing' || room.players.length < 2) return;
+    const cell = getRandomEmptyCell(room.board);
+    if (!cell) return;
+    executeRoomMove(room, room.turnColor, cell.r, cell.c);
+  }, TURN_LIMIT_MS);
+}
+
+function executeRoomMove(room, moveColor, r, c) {
+  if (!room || room.status !== 'playing' || room.players.length < 2) return;
+  if (room.board[r][c] !== 0) return;
+
+  clearRoomTurnTimer(room);
+  room.board[r][c] = moveColor;
+  room.moveCount += 1;
+  room.lastMove = { r, c, color: moveColor };
+
+  const playerIdx = moveColor === 1 ? room.blackIndex : (room.blackIndex === 0 ? 1 : 0);
+  const oppIdx = playerIdx === 0 ? 1 : 0;
+
+  const winLine = checkFiveWin(room.board, r, c, moveColor);
+  if (winLine) {
+    room.status = 'finished';
+    room.winLine = winLine;
+
+    const winner = room.players[playerIdx];
+    const loser = room.players[oppIdx];
+
+    winner.stats.wins += 1;
+    loser.stats.losses += 1;
+
+    for (const p of room.players) {
+      sendJson(p, {
+        type: 'stone_placed',
+        r,
+        c,
+        color: moveColor,
+        turnColor: room.turnColor,
+        winLine
+      });
+    }
+
+    sendJson(winner, {
+      type: 'match_over',
+      result: 'win',
+      winnerColor: moveColor,
+      winLine,
+      meStats: winner.stats,
+      oppStats: loser.stats
+    });
+    sendJson(loser, {
+      type: 'match_over',
+      result: 'lose',
+      winnerColor: moveColor,
+      winLine,
+      meStats: loser.stats,
+      oppStats: winner.stats
+    });
+    broadcastRoomList();
+    return;
+  }
+
+  if (room.moveCount >= BOARD_SIZE * BOARD_SIZE) {
+    room.status = 'finished';
+    const p1 = room.players[0];
+    const p2 = room.players[1];
+    p1.stats.draws += 1;
+    p2.stats.draws += 1;
+
+    for (const p of room.players) {
+      sendJson(p, {
+        type: 'stone_placed',
+        r,
+        c,
+        color: moveColor,
+        turnColor: room.turnColor,
+        winLine: null
+      });
+    }
+
+    sendJson(p1, {
+      type: 'match_over',
+      result: 'draw',
+      winnerColor: 0,
+      winLine: null,
+      meStats: p1.stats,
+      oppStats: p2.stats
+    });
+    sendJson(p2, {
+      type: 'match_over',
+      result: 'draw',
+      winnerColor: 0,
+      winLine: null,
+      meStats: p2.stats,
+      oppStats: p1.stats
+    });
+    broadcastRoomList();
+    return;
+  }
+
+  room.turnColor = moveColor === 1 ? 2 : 1;
+  scheduleRoomTurnTimer(room);
+
+  for (const p of room.players) {
+    sendJson(p, {
+      type: 'stone_placed',
+      r,
+      c,
+      color: moveColor,
+      turnColor: room.turnColor,
+      winLine: null
+    });
+  }
+}
+
 // ==========================================
 // Lobby & Room Management
 // ==========================================
@@ -381,6 +519,7 @@ function broadcastRoomList() {
 }
 
 function resetRoomMatchState(room, swapFirstPlayer = false) {
+  clearRoomTurnTimer(room);
   room.board = createEmptyBoard();
   room.moveCount = 0;
   room.lastMove = null;
@@ -392,6 +531,9 @@ function resetRoomMatchState(room, swapFirstPlayer = false) {
   }
   room.turnColor = 1; // 1 = Black, 2 = White
   room.status = room.players.length === 2 ? 'playing' : 'waiting';
+  if (room.status === 'playing') {
+    scheduleRoomTurnTimer(room);
+  }
 }
 
 function sendRoomStateToPlayers(room) {
@@ -534,102 +676,7 @@ function handleClientMessage(client, msg) {
       }
       if (room.board[r][c] !== 0) return;
 
-      room.board[r][c] = myColor;
-      room.moveCount += 1;
-      room.lastMove = { r, c, color: myColor };
-
-      const winLine = checkFiveWin(room.board, r, c, myColor);
-      if (winLine) {
-        room.status = 'finished';
-        room.winLine = winLine;
-
-        const oppIdx = playerIdx === 0 ? 1 : 0;
-        const winner = room.players[playerIdx];
-        const loser = room.players[oppIdx];
-
-        winner.stats.wins += 1;
-        loser.stats.losses += 1;
-
-        for (const p of room.players) {
-          sendJson(p, {
-            type: 'stone_placed',
-            r,
-            c,
-            color: myColor,
-            turnColor: room.turnColor,
-            winLine
-          });
-        }
-
-        sendJson(winner, {
-          type: 'match_over',
-          result: 'win',
-          winnerColor: myColor,
-          winLine,
-          meStats: winner.stats,
-          oppStats: loser.stats
-        });
-        sendJson(loser, {
-          type: 'match_over',
-          result: 'lose',
-          winnerColor: myColor,
-          winLine,
-          meStats: loser.stats,
-          oppStats: winner.stats
-        });
-        broadcastRoomList();
-        return;
-      }
-
-      if (room.moveCount >= BOARD_SIZE * BOARD_SIZE) {
-        room.status = 'finished';
-        const p1 = room.players[0];
-        const p2 = room.players[1];
-        p1.stats.draws += 1;
-        p2.stats.draws += 1;
-
-        for (const p of room.players) {
-          sendJson(p, {
-            type: 'stone_placed',
-            r,
-            c,
-            color: myColor,
-            turnColor: room.turnColor,
-            winLine: null
-          });
-        }
-
-        sendJson(p1, {
-          type: 'match_over',
-          result: 'draw',
-          winnerColor: 0,
-          winLine: null,
-          meStats: p1.stats,
-          oppStats: p2.stats
-        });
-        sendJson(p2, {
-          type: 'match_over',
-          result: 'draw',
-          winnerColor: 0,
-          winLine: null,
-          meStats: p2.stats,
-          oppStats: p1.stats
-        });
-        broadcastRoomList();
-        return;
-      }
-
-      room.turnColor = myColor === 1 ? 2 : 1;
-      for (const p of room.players) {
-        sendJson(p, {
-          type: 'stone_placed',
-          r,
-          c,
-          color: myColor,
-          turnColor: room.turnColor,
-          winLine: null
-        });
-      }
+      executeRoomMove(room, myColor, r, c);
       break;
     }
 
@@ -660,6 +707,7 @@ function leaveCurrentRoom(client) {
   if (!room) return;
 
   const wasPlaying = room.status === 'playing';
+  clearRoomTurnTimer(room);
   room.players = room.players.filter((p) => p.id !== client.id);
 
   if (room.players.length === 0) {
