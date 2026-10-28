@@ -77,9 +77,12 @@
           <p class="hero-sub">5 IN A ROW</p>
         </div>
 
-        <div class="name-input-pill">
-          <span class="name-label">👤 ID</span>
-          <input id="input-nickname" type="text" maxlength="10" placeholder="PLAYER" value="PLAYER" />
+        <div class="id-input-group">
+          <div class="name-input-pill" id="name-input-pill">
+            <span class="name-label">👤 ID</span>
+            <input id="input-nickname" type="text" maxlength="10" placeholder="ENTER ID" value="" autocomplete="off" />
+          </div>
+          <p id="id-warning-msg" class="id-warning-msg hidden">⚠️ ID를 정한 후에 게임을 진행해 주세요! (PLEASE ENTER ID)</p>
         </div>
 
         <div class="mode-grid">

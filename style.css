@@ -284,6 +284,13 @@ button {
   border-radius: 999px;
 }
 
+.id-input-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 .name-input-pill {
   display: inline-flex;
   align-items: center;
@@ -293,6 +300,31 @@ button {
   border-radius: 999px;
   padding: 6px 14px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.name-input-pill.input-error {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.22);
+  animation: idShake 0.32s ease;
+}
+
+@keyframes idShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-4px); }
+}
+
+.id-warning-msg {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 4px 12px;
+  border-radius: 999px;
+  text-align: center;
 }
 
 .name-label {
@@ -307,7 +339,7 @@ button {
   font-size: 0.92rem;
   font-weight: 900;
   color: #0f172a;
-  width: 110px;
+  width: 120px;
   text-align: center;
   background: #f1f5f9;
   border-radius: 6px;
