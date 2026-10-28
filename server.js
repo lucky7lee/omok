@@ -363,6 +363,18 @@ function clearRoomTurnTimer(room) {
   }
 }
 
+function closeAndRemoveRoom(room) {
+  if (!room) return;
+  clearRoomTurnTimer(room);
+  for (const p of room.players) {
+    if (p.roomId === room.id) {
+      p.roomId = null;
+    }
+  }
+  rooms.delete(room.id);
+  broadcastRoomList();
+}
+
 function scheduleRoomTurnTimer(room) {
   clearRoomTurnTimer(room);
   if (!room || room.status !== 'playing' || room.players.length < 2) return;
@@ -425,7 +437,7 @@ function executeRoomMove(room, moveColor, r, c) {
       meStats: loser.stats,
       oppStats: winner.stats
     });
-    broadcastRoomList();
+    closeAndRemoveRoom(room);
     return;
   }
 
@@ -463,7 +475,7 @@ function executeRoomMove(room, moveColor, r, c) {
       meStats: p2.stats,
       oppStats: p1.stats
     });
-    broadcastRoomList();
+    closeAndRemoveRoom(room);
     return;
   }
 

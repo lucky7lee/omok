@@ -46,6 +46,14 @@ const state = {
 
 let aiTimerId = null;
 let turnTimerIntervalId = null;
+let multiReturnLobbyTimerId = null;
+
+function clearMultiReturnLobbyTimer() {
+  if (multiReturnLobbyTimerId) {
+    clearTimeout(multiReturnLobbyTimerId);
+    multiReturnLobbyTimerId = null;
+  }
+}
 
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
@@ -392,6 +400,7 @@ function showScreen(screenName) {
   if (screenName !== 'game') {
     clearTurnCountdown();
     clearAiTimer();
+    clearMultiReturnLobbyTimer();
   }
   document.getElementById('screen-menu').classList.toggle('hidden', screenName !== 'menu');
   document.getElementById('screen-lobby').classList.toggle('hidden', screenName !== 'lobby');
@@ -1183,6 +1192,19 @@ function clearHostedRoomTurnTimer() {
   }
 }
 
+function closeHostedRoomAfterMatch() {
+  if (!hostedRoom) return;
+  clearHostedRoomTurnTimer();
+  if (hostAnnounceInterval) {
+    clearInterval(hostAnnounceInterval);
+    hostAnnounceInterval = null;
+  }
+  mqttPublish(TOPIC_LOBBY, { kind: 'room_remove', roomId: hostedRoom.id });
+  serverlessRooms.delete(hostedRoom.id);
+  hostedRoom = null;
+  joinedHostId = null;
+}
+
 function scheduleHostedRoomTurnTimer() {
   clearHostedRoomTurnTimer();
   if (!hostedRoom || hostedRoom.status !== 'playing' || hostedRoom.players.length < 2) return;
@@ -1241,7 +1263,7 @@ function executeHostedRoomMove(moveColor, r, c) {
       meStats: loser.stats,
       oppStats: winner.stats
     });
-    announceHostedRoom();
+    closeHostedRoomAfterMatch();
     return;
   }
 
@@ -1278,7 +1300,7 @@ function executeHostedRoomMove(moveColor, r, c) {
       meStats: p2.stats,
       oppStats: p1.stats
     });
-    announceHostedRoom();
+    closeHostedRoomAfterMatch();
     return;
   }
 
@@ -1704,6 +1726,7 @@ function handleMultiplayerStonePlaced(msg) {
 
 function handleMultiplayerMatchOver(msg) {
   clearTurnCountdown();
+  clearMultiReturnLobbyTimer();
   state.isGameOver = true;
   if (msg.winLine) state.winLine = msg.winLine;
 
@@ -1715,24 +1738,41 @@ function handleMultiplayerMatchOver(msg) {
   updateTurnBannerUI();
   drawOmokBoard();
 
-  if (msg.result === 'win') {
-    showGameOverModal('win', '5 IN A ROW!');
-  } else if (msg.result === 'lose') {
-    showGameOverModal('lose', `${state.oppNickname} MADE 5 IN A ROW`);
-  } else {
-    showGameOverModal('draw', 'FULL BOARD DRAW');
+  let reasonText = '5 IN A ROW!';
+  if (msg.result === 'lose') {
+    reasonText = `${state.oppNickname} MADE 5 IN A ROW`;
+  } else if (msg.result === 'draw') {
+    reasonText = 'FULL BOARD DRAW';
   }
+
+  showGameOverModal(msg.result, `${reasonText} (LOBBY IN 3s...)`, true);
+
+  // Clean up joined room reference and automatically return both host & guest to lobby after 3s
+  joinedHostId = null;
+  multiReturnLobbyTimerId = setTimeout(() => {
+    multiReturnLobbyTimerId = null;
+    if (state.mode === 'multi' && state.screen === 'game') {
+      state.oppNickname = 'OPP';
+      showScreen('lobby');
+      wsSend({ type: 'get_rooms' });
+    }
+  }, 3000);
 }
 
 // ==========================================
 // Game Over Modal
 // ==========================================
-function showGameOverModal(result, subtitleText) {
+function showGameOverModal(result, subtitleText, isAutoLobby = false) {
   playMatchSound(result);
   const modal = document.getElementById('gameover-modal');
   const badge = document.getElementById('modal-badge');
   const title = document.getElementById('modal-title');
   const sub = document.getElementById('modal-sub');
+  const btnRow = document.getElementById('modal-btn-row');
+
+  if (btnRow) {
+    btnRow.classList.toggle('hidden', Boolean(isAutoLobby));
+  }
 
   badge.className = `modal-badge ${result}`;
   if (result === 'win') {
