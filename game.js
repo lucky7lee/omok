@@ -304,13 +304,12 @@ function loadSavedData() {
       const p = JSON.parse(sMulti);
       state.stats.multi.me = sanitizeRecord(p.me);
     }
-    const savedNick = localStorage.getItem('omok_nickname_user_v2');
-    if (savedNick) {
-      state.nickname = savedNick;
-      const input = document.getElementById('input-nickname');
-      if (input) input.value = savedNick;
-    }
+    localStorage.removeItem('omok_nickname_v1');
+    localStorage.removeItem('omok_nickname_user_v2');
   } catch (e) {}
+  state.nickname = '';
+  const input = document.getElementById('input-nickname');
+  if (input) input.value = '';
   updateTopScoreHeader();
 }
 
@@ -417,13 +416,6 @@ function syncNickname() {
   const clean = (input ? input.value : '').trim().slice(0, 10);
   state.nickname = clean;
   if (input) input.value = clean;
-  try {
-    if (clean) {
-      localStorage.setItem('omok_nickname_user_v2', clean);
-    } else {
-      localStorage.removeItem('omok_nickname_user_v2');
-    }
-  } catch (e) {}
   if (clean) {
     const pill = document.getElementById('name-input-pill');
     const warn = document.getElementById('id-warning-msg');
