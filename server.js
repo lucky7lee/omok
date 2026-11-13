@@ -13,6 +13,8 @@ const { execFile } = require('child_process');
 const PORT = process.env.PORT || 3010;
 const BOARD_SIZE = 15;
 const TURN_LIMIT_MS = 30000;
+const HOST_START_LIMIT_MS = 30000;
+const ROUND_TRANSITION_MS = 8200; // 5s result + 3s series score
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -356,6 +358,22 @@ function getRandomEmptyCell(board) {
   return empty[Math.floor(Math.random() * empty.length)];
 }
 
+function clearRoomTimers(room) {
+  if (!room) return;
+  if (room.turnTimer) {
+    clearTimeout(room.turnTimer);
+    room.turnTimer = null;
+  }
+  if (room.readyTimer) {
+    clearTimeout(room.readyTimer);
+    room.readyTimer = null;
+  }
+  if (room.roundTimer) {
+    clearTimeout(room.roundTimer);
+    room.roundTimer = null;
+  }
+}
+
 function clearRoomTurnTimer(room) {
   if (room && room.turnTimer) {
     clearTimeout(room.turnTimer);
@@ -365,7 +383,7 @@ function clearRoomTurnTimer(room) {
 
 function closeAndRemoveRoom(room) {
   if (!room) return;
-  clearRoomTurnTimer(room);
+  clearRoomTimers(room);
   for (const p of room.players) {
     if (p.roomId === room.id) {
       p.roomId = null;
@@ -373,6 +391,43 @@ function closeAndRemoveRoom(room) {
   }
   rooms.delete(room.id);
   broadcastRoomList();
+}
+
+function startRoomReadyCountdown(room) {
+  clearRoomTimers(room);
+  if (!room || room.players.length < 2) return;
+  room.status = 'ready';
+  room.readyDeadline = Date.now() + HOST_START_LIMIT_MS;
+  room.readyTimer = setTimeout(() => {
+    if (!rooms.has(room.id) || room.status !== 'ready' || room.players.length < 2) return;
+    beginRoomMatch(room);
+  }, HOST_START_LIMIT_MS);
+}
+
+function beginRoomMatch(room) {
+  if (!room || room.players.length < 2) return;
+  clearRoomTimers(room);
+  room.series = { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 };
+  room.blackIndex = 0;
+  resetRoomBoardOnly(room, false);
+  room.status = 'playing';
+  scheduleRoomTurnTimer(room);
+  sendRoomStateToPlayers(room);
+  broadcastRoomList();
+}
+
+function resetRoomBoardOnly(room, swapFirstPlayer = false) {
+  clearRoomTurnTimer(room);
+  room.board = createEmptyBoard();
+  room.moveCount = 0;
+  room.lastMove = null;
+  room.winLine = null;
+  if (swapFirstPlayer && room.players.length === 2) {
+    room.blackIndex = room.blackIndex === 0 ? 1 : 0;
+  } else if (typeof room.blackIndex !== 'number') {
+    room.blackIndex = 0;
+  }
+  room.turnColor = 1;
 }
 
 function scheduleRoomTurnTimer(room) {
@@ -400,82 +455,95 @@ function executeRoomMove(room, moveColor, r, c) {
   const oppIdx = playerIdx === 0 ? 1 : 0;
 
   const winLine = checkFiveWin(room.board, r, c, moveColor);
-  if (winLine) {
-    room.status = 'finished';
-    room.winLine = winLine;
+  const isBoardDraw = !winLine && room.moveCount >= BOARD_SIZE * BOARD_SIZE;
 
-    const winner = room.players[playerIdx];
-    const loser = room.players[oppIdx];
+  if (winLine || isBoardDraw) {
+    clearRoomTimers(room);
+    room.status = 'round_pause';
+    room.winLine = winLine || null;
 
-    winner.stats.wins += 1;
-    loser.stats.losses += 1;
+    const p0 = room.players[0];
+    const p1 = room.players[1];
 
-    for (const p of room.players) {
+    if (winLine) {
+      if (playerIdx === 0) {
+        room.series.p0Wins += 1;
+      } else {
+        room.series.p1Wins += 1;
+      }
+      const winner = room.players[playerIdx];
+      const loser = room.players[oppIdx];
+      winner.stats.wins += 1;
+      loser.stats.losses += 1;
+    } else {
+      room.series.draws += 1;
+      p0.stats.draws += 1;
+      p1.stats.draws += 1;
+    }
+
+    const matchFinished = room.series.p0Wins >= 2 || room.series.p1Wins >= 2;
+    const winnerIdx = room.series.p0Wins >= 2 ? 0 : room.series.p1Wins >= 2 ? 1 : -1;
+    if (matchFinished) {
+      room.status = 'finished';
+    }
+
+    for (let idx = 0; idx < room.players.length; idx++) {
+      const p = room.players[idx];
+      const opp = room.players[idx === 0 ? 1 : 0];
+      const mySeriesWins = idx === 0 ? room.series.p0Wins : room.series.p1Wins;
+      const oppSeriesWins = idx === 0 ? room.series.p1Wins : room.series.p0Wins;
+      const roundResult = !winLine ? 'draw' : idx === playerIdx ? 'win' : 'lose';
+      const matchResult = !matchFinished ? null : idx === winnerIdx ? 'win' : 'lose';
+
       sendJson(p, {
         type: 'stone_placed',
         r,
         c,
         color: moveColor,
         turnColor: room.turnColor,
-        winLine
+        winLine: winLine || null,
+        roundResult,
+        matchFinished,
+        matchResult,
+        series: {
+          round: room.series.round,
+          myWins: mySeriesWins,
+          oppWins: oppSeriesWins,
+          draws: room.series.draws
+        },
+        meStats: p.stats,
+        oppStats: opp.stats
       });
     }
 
-    sendJson(winner, {
-      type: 'match_over',
-      result: 'win',
-      winnerColor: moveColor,
-      winLine,
-      meStats: winner.stats,
-      oppStats: loser.stats
-    });
-    sendJson(loser, {
-      type: 'match_over',
-      result: 'lose',
-      winnerColor: moveColor,
-      winLine,
-      meStats: loser.stats,
-      oppStats: winner.stats
-    });
-    closeAndRemoveRoom(room);
-    return;
-  }
-
-  if (room.moveCount >= BOARD_SIZE * BOARD_SIZE) {
-    room.status = 'finished';
-    const p1 = room.players[0];
-    const p2 = room.players[1];
-    p1.stats.draws += 1;
-    p2.stats.draws += 1;
-
-    for (const p of room.players) {
-      sendJson(p, {
-        type: 'stone_placed',
-        r,
-        c,
-        color: moveColor,
-        turnColor: room.turnColor,
-        winLine: null
-      });
-    }
-
-    sendJson(p1, {
-      type: 'match_over',
-      result: 'draw',
-      winnerColor: 0,
-      winLine: null,
-      meStats: p1.stats,
-      oppStats: p2.stats
-    });
-    sendJson(p2, {
-      type: 'match_over',
-      result: 'draw',
-      winnerColor: 0,
-      winLine: null,
-      meStats: p2.stats,
-      oppStats: p1.stats
-    });
-    closeAndRemoveRoom(room);
+    room.roundTimer = setTimeout(() => {
+      if (!rooms.has(room.id) || room.players.length < 2) return;
+      if (matchFinished) {
+        for (let idx = 0; idx < room.players.length; idx++) {
+          const p = room.players[idx];
+          const opp = room.players[idx === 0 ? 1 : 0];
+          sendJson(p, {
+            type: 'match_over',
+            result: idx === winnerIdx ? 'win' : 'lose',
+            meStats: p.stats,
+            oppStats: opp.stats,
+            series: {
+              round: room.series.round,
+              myWins: idx === 0 ? room.series.p0Wins : room.series.p1Wins,
+              oppWins: idx === 0 ? room.series.p1Wins : room.series.p0Wins,
+              draws: room.series.draws
+            }
+          });
+        }
+        closeAndRemoveRoom(room);
+      } else {
+        room.series.round += 1;
+        resetRoomBoardOnly(room, true);
+        room.status = 'playing';
+        scheduleRoomTurnTimer(room);
+        sendRoomStateToPlayers(room);
+      }
+    }, ROUND_TRANSITION_MS);
     return;
   }
 
@@ -530,24 +598,6 @@ function broadcastRoomList() {
   }
 }
 
-function resetRoomMatchState(room, swapFirstPlayer = false) {
-  clearRoomTurnTimer(room);
-  room.board = createEmptyBoard();
-  room.moveCount = 0;
-  room.lastMove = null;
-  room.winLine = null;
-  if (swapFirstPlayer && room.players.length === 2) {
-    room.blackIndex = room.blackIndex === 0 ? 1 : 0;
-  } else if (typeof room.blackIndex !== 'number') {
-    room.blackIndex = 0;
-  }
-  room.turnColor = 1; // 1 = Black, 2 = White
-  room.status = room.players.length === 2 ? 'playing' : 'waiting';
-  if (room.status === 'playing') {
-    scheduleRoomTurnTimer(room);
-  }
-}
-
 function sendRoomStateToPlayers(room) {
   for (let idx = 0; idx < room.players.length; idx++) {
     const p = room.players[idx];
@@ -555,6 +605,8 @@ function sendRoomStateToPlayers(room) {
     const opp = room.players[oppIdx] || null;
     const myColor = idx === room.blackIndex ? 1 : 2;
     const oppColor = myColor === 1 ? 2 : 1;
+    const myWins = idx === 0 ? room.series.p0Wins : room.series.p1Wins;
+    const oppWins = idx === 0 ? room.series.p1Wins : room.series.p0Wins;
 
     sendJson(p, {
       type: 'room_update',
@@ -562,13 +614,25 @@ function sendRoomStateToPlayers(room) {
         id: room.id,
         title: room.title,
         status: room.status,
+        isHost: idx === 0,
+        readySecondsLeft:
+          room.status === 'ready' && room.readyDeadline
+            ? Math.max(0, Math.ceil((room.readyDeadline - Date.now()) / 1000))
+            : 0,
         turnColor: room.turnColor,
         board: room.board,
         lastMove: room.lastMove,
         winLine: room.winLine,
+        series: {
+          round: room.series.round,
+          myWins,
+          oppWins,
+          draws: room.series.draws
+        },
         me: {
           id: p.id,
           nickname: p.nickname,
+          badgeLevel: p.badgeLevel || 0,
           color: myColor,
           stats: p.stats
         },
@@ -576,6 +640,7 @@ function sendRoomStateToPlayers(room) {
           ? {
               id: opp.id,
               nickname: opp.nickname,
+              badgeLevel: opp.badgeLevel || 0,
               color: oppColor,
               stats: opp.stats
             }
@@ -590,6 +655,7 @@ function handleClientMessage(client, msg) {
     case 'set_profile': {
       const clean = String(msg.nickname || '').trim().slice(0, 12);
       if (clean) client.nickname = clean;
+      if (typeof msg.badgeLevel === 'number') client.badgeLevel = Math.max(0, Math.min(4, msg.badgeLevel));
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
       if (client.roomId && rooms.has(client.roomId)) {
         sendRoomStateToPlayers(rooms.get(client.roomId));
@@ -610,6 +676,7 @@ function handleClientMessage(client, msg) {
         const clean = String(msg.nickname).trim().slice(0, 12);
         if (clean) client.nickname = clean;
       }
+      if (typeof msg.badgeLevel === 'number') client.badgeLevel = Math.max(0, Math.min(4, msg.badgeLevel));
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
 
       const roomTitle = String(msg.title || `${client.nickname}'S ROOM`).trim().slice(0, 24);
@@ -617,10 +684,12 @@ function handleClientMessage(client, msg) {
       const room = {
         id: roomId,
         title: roomTitle,
+        hostId: client.id,
         players: [client],
         blackIndex: 0,
         turnColor: 1,
         status: 'waiting',
+        series: { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 },
         board: createEmptyBoard(),
         moveCount: 0,
         lastMove: null,
@@ -628,7 +697,7 @@ function handleClientMessage(client, msg) {
       };
       client.roomId = roomId;
       rooms.set(roomId, room);
-      resetRoomMatchState(room, false);
+      resetRoomBoardOnly(room, false);
 
       sendRoomStateToPlayers(room);
       broadcastRoomList();
@@ -641,6 +710,7 @@ function handleClientMessage(client, msg) {
         const clean = String(msg.nickname).trim().slice(0, 12);
         if (clean) client.nickname = clean;
       }
+      if (typeof msg.badgeLevel === 'number') client.badgeLevel = Math.max(0, Math.min(4, msg.badgeLevel));
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
 
       const room = rooms.get(msg.roomId);
@@ -658,10 +728,21 @@ function handleClientMessage(client, msg) {
       room.players.push(client);
       client.roomId = room.id;
       room.blackIndex = 0;
-      resetRoomMatchState(room, false);
+      room.series = { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 };
+      resetRoomBoardOnly(room, false);
+      startRoomReadyCountdown(room);
 
       sendRoomStateToPlayers(room);
       broadcastRoomList();
+      break;
+    }
+
+    case 'start_game': {
+      const room = rooms.get(client.roomId);
+      if (!room || room.hostId !== client.id || room.players.length < 2) return;
+      if (room.status === 'ready') {
+        beginRoomMatch(room);
+      }
       break;
     }
 
@@ -696,9 +777,7 @@ function handleClientMessage(client, msg) {
       const room = rooms.get(client.roomId);
       if (!room || room.players.length < 2) return;
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
-      resetRoomMatchState(room, true);
-      sendRoomStateToPlayers(room);
-      broadcastRoomList();
+      beginRoomMatch(room);
       break;
     }
 
@@ -718,22 +797,33 @@ function leaveCurrentRoom(client) {
   const room = rooms.get(roomId);
   if (!room) return;
 
-  const wasPlaying = room.status === 'playing';
-  clearRoomTurnTimer(room);
-  room.players = room.players.filter((p) => p.id !== client.id);
+  const isHostLeaving = room.hostId === client.id;
+  const wasActiveMatch = room.status === 'playing' || room.status === 'round_pause';
+  clearRoomTimers(room);
 
-  if (room.players.length === 0) {
-    rooms.delete(roomId);
-  } else {
-    room.blackIndex = 0;
-    resetRoomMatchState(room, false);
-    sendRoomStateToPlayers(room);
-    if (wasPlaying) {
-      sendJson(room.players[0], {
+  const remaining = room.players.filter((p) => p.id !== client.id);
+  room.players = [];
+  rooms.delete(roomId);
+
+  if (remaining.length > 0) {
+    const survivor = remaining[0];
+    survivor.roomId = null;
+    if (wasActiveMatch) {
+      survivor.stats.wins += 1;
+      sendJson(survivor, {
         type: 'opponent_left',
-        message: 'OPPONENT LEFT'
+        awardedWin: true,
+        meStats: survivor.stats,
+        message: '상대방이 나가서 1승을 획득했습니다! (OPPONENT LEFT +1 WIN)'
+      });
+    } else if (isHostLeaving) {
+      sendJson(survivor, {
+        type: 'opponent_left',
+        awardedWin: false,
+        message: '방장이 방을 나가 대기실로 이동합니다.'
       });
     }
+    sendJson(survivor, { type: 'left_room', rooms: getPublicRoomList() });
   }
   broadcastRoomList();
 }

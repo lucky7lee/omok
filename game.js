@@ -4,6 +4,7 @@
 
 const BOARD_SIZE = 15;
 const TURN_LIMIT_SEC = 30;
+const HOST_START_LIMIT_SEC = 30;
 const STAR_POINTS = [
   [3, 3],
   [3, 11],
@@ -12,11 +13,32 @@ const STAR_POINTS = [
   [11, 11]
 ];
 
+const AI_STAGES = [
+  { level: 1, name: '초보 목수', randChance: 0.45, topK: 5, depth: 1 },
+  { level: 2, name: '견습 기사', randChance: 0.28, topK: 4, depth: 1 },
+  { level: 3, name: '도장 수련생', randChance: 0.14, topK: 3, depth: 1 },
+  { level: 4, name: '바둑돌 수호자', randChance: 0.05, topK: 2, depth: 1 },
+  { level: 5, name: '철벽 전략가', randChance: 0, topK: 1, depth: 1 },
+  { level: 6, name: '백전노장', randChance: 0, topK: 6, depth: 2 },
+  { level: 7, name: '그림자 고수', randChance: 0, topK: 8, depth: 2 },
+  { level: 8, name: '천하제일 검객', randChance: 0, topK: 10, depth: 2 },
+  { level: 9, name: '불멸의 마스터', randChance: 0, topK: 12, depth: 2 },
+  { level: 10, name: '절대지존 AI', randChance: 0, topK: 14, depth: 2 }
+];
+
 const state = {
   screen: 'menu', // 'menu' | 'lobby' | 'game'
   mode: 'single', // 'single' | 'multi'
   nickname: '',
   oppNickname: 'AI',
+  oppBadgeLevel: 0,
+  bestBadgeLevel: 0, // 0: none, 1: ⭐(Lv.3), 2: ⭐⭐(Lv.5), 3: ⭐⭐⭐(Lv.8), 4: 💎(Lv.10 clear)
+
+  singleStage: 1,
+  series: { round: 1, myWins: 0, oppWins: 0, draws: 0 },
+  multiStatus: 'waiting', // 'waiting' | 'ready' | 'playing' | 'round_pause' | 'finished'
+  isHost: false,
+  readySecondsLeft: 0,
 
   myColor: 1, // 1 = Black, 2 = White
   oppColor: 2,
@@ -29,7 +51,10 @@ const state = {
   winLine: null,
   hoverCell: null,
   isGameOver: false,
+  isMatchOver: false,
+  isRoundTransition: false,
   isWaitingOpponent: false,
+  abandonPenalized: false,
   soundEnabled: true,
 
   stats: {
@@ -47,6 +72,83 @@ const state = {
 let aiTimerId = null;
 let turnTimerIntervalId = null;
 let multiReturnLobbyTimerId = null;
+let readyCountdownIntervalId = null;
+let roundTransitionIntervalId = null;
+let roundTransitionTimeoutId = null;
+let matchOverHandled = false;
+
+function getBadgePrefix(level) {
+  if (level >= 4) return '💎 ';
+  if (level === 3) return '⭐⭐⭐ ';
+  if (level === 2) return '⭐⭐ ';
+  if (level === 1) return '⭐ ';
+  return '';
+}
+
+function getBadgeOnly(level) {
+  if (level >= 4) return '💎';
+  if (level === 3) return '⭐⭐⭐';
+  if (level === 2) return '⭐⭐';
+  if (level === 1) return '⭐';
+  return '';
+}
+
+function formatNameWithBadge(name, badgeLevel) {
+  const prefix = getBadgePrefix(badgeLevel || 0);
+  return `${prefix}${name || ''}`.trim();
+}
+
+function checkAndUpgradeBadge(stageReached, clearedStage10 = false) {
+  let target = state.bestBadgeLevel;
+  if (clearedStage10) target = Math.max(target, 4);
+  else if (stageReached >= 8) target = Math.max(target, 3);
+  else if (stageReached >= 5) target = Math.max(target, 2);
+  else if (stageReached >= 3) target = Math.max(target, 1);
+
+  if (target > state.bestBadgeLevel) {
+    state.bestBadgeLevel = target;
+    try {
+      localStorage.setItem('omok_rank_badge_v1', String(state.bestBadgeLevel));
+    } catch (e) {}
+    renderMenuRankBadge();
+    updateTopScoreHeader();
+    return true;
+  }
+  return false;
+}
+
+function renderMenuRankBadge() {
+  const badgeEl = document.getElementById('menu-rank-badge');
+  if (!badgeEl) return;
+  const icon = getBadgeOnly(state.bestBadgeLevel);
+  if (icon) {
+    badgeEl.textContent = icon;
+    badgeEl.classList.remove('hidden');
+  } else {
+    badgeEl.textContent = '';
+    badgeEl.classList.add('hidden');
+  }
+}
+
+function clearReadyCountdown() {
+  if (readyCountdownIntervalId) {
+    clearInterval(readyCountdownIntervalId);
+    readyCountdownIntervalId = null;
+  }
+}
+
+function clearRoundTransitionTimers() {
+  if (roundTransitionIntervalId) {
+    clearInterval(roundTransitionIntervalId);
+    roundTransitionIntervalId = null;
+  }
+  if (roundTransitionTimeoutId) {
+    clearTimeout(roundTransitionTimeoutId);
+    roundTransitionTimeoutId = null;
+  }
+  const overlay = document.getElementById('round-transition-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
 
 function clearMultiReturnLobbyTimer() {
   if (multiReturnLobbyTimerId) {
@@ -84,17 +186,27 @@ function clearTurnCountdown() {
   }
 }
 
+function isPlayingTurnActive() {
+  if (state.screen !== 'game' || state.isGameOver || state.isMatchOver || state.isRoundTransition || state.isWaitingOpponent) {
+    return false;
+  }
+  if (state.mode === 'multi' && state.multiStatus !== 'playing') {
+    return false;
+  }
+  return true;
+}
+
 function startTurnCountdown() {
   clearTurnCountdown();
   state.turnSecondsLeft = TURN_LIMIT_SEC;
   renderTurnTimerBadge();
 
-  if (state.screen !== 'game' || state.isGameOver || state.isWaitingOpponent) {
+  if (!isPlayingTurnActive()) {
     return;
   }
 
   turnTimerIntervalId = setInterval(() => {
-    if (state.screen !== 'game' || state.isGameOver || state.isWaitingOpponent) {
+    if (!isPlayingTurnActive()) {
       clearTurnCountdown();
       renderTurnTimerBadge();
       return;
@@ -117,7 +229,7 @@ function startTurnCountdown() {
 function renderTurnTimerBadge() {
   const badge = document.getElementById('turn-timer-badge');
   if (!badge) return;
-  if (state.isWaitingOpponent || state.isGameOver) {
+  if (!isPlayingTurnActive()) {
     badge.classList.add('hidden');
     badge.classList.remove('urgent');
     return;
@@ -128,7 +240,7 @@ function renderTurnTimerBadge() {
 }
 
 function handleTurnTimeoutAutoPlace() {
-  if (state.isGameOver || state.isWaitingOpponent) return;
+  if (!isPlayingTurnActive()) return;
 
   // When it is my turn and 30 seconds have elapsed, place randomly at any empty spot
   if (state.turnColor === state.myColor) {
@@ -304,12 +416,15 @@ function loadSavedData() {
       const p = JSON.parse(sMulti);
       state.stats.multi.me = sanitizeRecord(p.me);
     }
+    const savedBadge = Number(localStorage.getItem('omok_rank_badge_v1') || 0);
+    state.bestBadgeLevel = Math.max(0, Math.min(4, Number.isFinite(savedBadge) ? savedBadge : 0));
     localStorage.removeItem('omok_nickname_v1');
     localStorage.removeItem('omok_nickname_user_v2');
   } catch (e) {}
   state.nickname = '';
   const input = document.getElementById('input-nickname');
   if (input) input.value = '';
+  renderMenuRankBadge();
   updateTopScoreHeader();
 }
 
@@ -334,10 +449,13 @@ function updateTopScoreHeader() {
   const myRate = calcWinRate(myRec);
   const oppRate = calcWinRate(oppRec);
 
-  document.getElementById('my-header-name').textContent = state.nickname || 'ME';
+  document.getElementById('my-header-name').textContent = formatNameWithBadge(
+    state.nickname || 'ME',
+    state.bestBadgeLevel
+  );
   document.getElementById('opp-header-name').textContent = isMulti
-    ? state.oppNickname || 'OPP'
-    : 'AI';
+    ? formatNameWithBadge(state.oppNickname || 'OPP', state.oppBadgeLevel)
+    : state.oppNickname || 'AI';
 
   document.getElementById('my-stone-dot').textContent = state.myColor === 1 ? '⚫' : '⚪';
   document.getElementById('opp-stone-dot').textContent = state.oppColor === 1 ? '⚫' : '⚪';
@@ -355,13 +473,134 @@ function updateTopScoreHeader() {
   const myBox = document.getElementById('header-my-box');
   const oppBox = document.getElementById('header-opp-box');
 
-  if (state.screen === 'game' && !state.isGameOver && !state.isWaitingOpponent) {
+  if (isPlayingTurnActive()) {
     myBox.classList.toggle('active-turn', state.turnColor === state.myColor);
     oppBox.classList.toggle('active-turn', state.turnColor === state.oppColor);
   } else {
     myBox.classList.remove('active-turn');
     oppBox.classList.remove('active-turn');
   }
+  updateBo3Scoreboard();
+}
+
+function updateBo3Scoreboard() {
+  const oppNameEl = document.getElementById('bo3-opp-name');
+  const oppPipsEl = document.getElementById('bo3-opp-pips');
+  const oppWinsEl = document.getElementById('bo3-opp-wins');
+  const stageTagEl = document.getElementById('bo3-stage-tag');
+  const roundTagEl = document.getElementById('bo3-round-tag');
+  const meWinsEl = document.getElementById('bo3-me-wins');
+  const mePipsEl = document.getElementById('bo3-me-pips');
+  const meNameEl = document.getElementById('bo3-me-name');
+  if (!oppNameEl) return;
+
+  const s = state.series || { round: 1, myWins: 0, oppWins: 0, draws: 0 };
+  const myPips = '●'.repeat(Math.min(2, s.myWins)) + '○'.repeat(Math.max(0, 2 - s.myWins));
+  const oppPips = '●'.repeat(Math.min(2, s.oppWins)) + '○'.repeat(Math.max(0, 2 - s.oppWins));
+
+  oppNameEl.textContent =
+    state.mode === 'multi'
+      ? formatNameWithBadge(state.oppNickname || 'OPP', state.oppBadgeLevel)
+      : state.oppNickname || 'AI';
+  oppPipsEl.textContent = oppPips;
+  oppWinsEl.textContent = String(s.oppWins);
+
+  meNameEl.textContent = formatNameWithBadge(state.nickname || 'ME', state.bestBadgeLevel);
+  mePipsEl.textContent = myPips;
+  meWinsEl.textContent = String(s.myWins);
+
+  stageTagEl.textContent = state.mode === 'single' ? `STAGE ${state.singleStage}/10` : 'MULTI · BO3';
+  roundTagEl.textContent = `R${s.round} (${s.myWins}승 ${s.oppWins}패${s.draws > 0 ? ` ${s.draws}무` : ''})`;
+}
+
+function formatSeriesKorean(s) {
+  const w = s.myWins || 0;
+  const l = s.oppWins || 0;
+  const d = s.draws || 0;
+  const parts = [];
+  if (w > 0) parts.push(`${w}승`);
+  if (l > 0) parts.push(`${l}패`);
+  if (d > 0) parts.push(`${d}무`);
+  if (parts.length === 0) return '0승 0패!';
+  return `${parts.join(' ')}!`;
+}
+
+function playRoundTransitionOverlay(roundResult, seriesSnapshot, onComplete) {
+  clearRoundTransitionTimers();
+  state.isRoundTransition = true;
+  clearTurnCountdown();
+  renderTurnTimerBadge();
+
+  const overlay = document.getElementById('round-transition-overlay');
+  const badge = document.getElementById('rt-badge');
+  const main = document.getElementById('rt-main');
+  const sub = document.getElementById('rt-sub');
+  if (!overlay || !badge || !main || !sub) {
+    state.isRoundTransition = false;
+    if (onComplete) onComplete();
+    return;
+  }
+
+  playMatchSound(roundResult);
+  const roundNum = (seriesSnapshot && seriesSnapshot.round) || state.series.round || 1;
+  badge.textContent = `ROUND ${roundNum}`;
+
+  const resultLabel =
+    roundResult === 'win' ? '🎉 이겼다!' : roundResult === 'lose' ? '💔 졌다!' : '🤝 비겼다!';
+  let sec = 5;
+  main.textContent = resultLabel;
+  sub.textContent = `${sec}초 후 결과 집계...`;
+  overlay.classList.remove('hidden');
+
+  let phase = 1;
+  roundTransitionIntervalId = setInterval(() => {
+    sec -= 1;
+    if (phase === 1) {
+      if (sec > 0) {
+        sub.textContent = `${sec}초 후 결과 집계...`;
+      } else {
+        phase = 2;
+        sec = 3;
+        badge.textContent = '3판 2승제 현황';
+        main.textContent = formatSeriesKorean(seriesSnapshot || state.series);
+        sub.textContent = `${sec}초 후 진행...`;
+      }
+    } else {
+      if (sec > 0) {
+        sub.textContent = `${sec}초 후 진행...`;
+      } else {
+        clearRoundTransitionTimers();
+        state.isRoundTransition = false;
+        if (onComplete) onComplete();
+      }
+    }
+  }, 1000);
+}
+
+function isActiveMatch() {
+  if (state.screen !== 'game') return false;
+  if (state.mode === 'single') {
+    return !state.isMatchOver;
+  }
+  return state.multiStatus === 'playing' || state.multiStatus === 'round_pause';
+}
+
+function penalizeActiveMatchAbandon(sendLeave = true) {
+  if (state.abandonPenalized || !isActiveMatch()) return false;
+  state.abandonPenalized = true;
+
+  if (state.mode === 'single') {
+    state.stats.single.me.losses += 1;
+    state.stats.single.ai.wins += 1;
+    saveStatsData();
+  } else {
+    state.stats.multi.me.losses += 1;
+    saveStatsData();
+    if (sendLeave) {
+      wsSend({ type: 'leave_room', abandoned: true });
+    }
+  }
+  return true;
 }
 
 function updateTurnBannerUI() {
@@ -369,14 +608,14 @@ function updateTurnBannerUI() {
   const icon = document.getElementById('turn-stone-icon');
   const text = document.getElementById('turn-status-text');
 
-  if (state.isWaitingOpponent) {
+  if (state.isWaitingOpponent || (state.mode === 'multi' && state.multiStatus === 'ready')) {
     banner.className = 'turn-banner wait-turn';
     icon.textContent = '⏳';
-    text.textContent = 'WAITING OPP...';
+    text.textContent = state.multiStatus === 'ready' ? 'READY...' : 'WAITING OPP...';
     return;
   }
 
-  if (state.isGameOver) {
+  if (state.isGameOver || state.isMatchOver) {
     banner.className = 'turn-banner opp-turn';
     icon.textContent = '🏁';
     text.textContent = 'FINISHED';
@@ -395,11 +634,16 @@ function updateTurnBannerUI() {
 }
 
 function showScreen(screenName) {
+  const prevScreen = state.screen;
   state.screen = screenName;
   if (screenName !== 'game') {
     clearTurnCountdown();
     clearAiTimer();
     clearMultiReturnLobbyTimer();
+    clearReadyCountdown();
+    clearRoundTransitionTimers();
+    const readyOv = document.getElementById('host-ready-overlay');
+    if (readyOv) readyOv.classList.add('hidden');
   }
   document.getElementById('screen-menu').classList.toggle('hidden', screenName !== 'menu');
   document.getElementById('screen-lobby').classList.toggle('hidden', screenName !== 'lobby');
@@ -407,6 +651,11 @@ function showScreen(screenName) {
   document.getElementById('gameover-modal').classList.add('hidden');
   updateTopScoreHeader();
   if (screenName === 'game') {
+    if (prevScreen !== 'game') {
+      try {
+        history.pushState({ omokInGame: true }, '');
+      } catch (e) {}
+    }
     requestAnimationFrame(() => drawOmokBoard());
   }
 }
@@ -739,19 +988,17 @@ function scoreIntersectionForColor(board, r, c, color) {
   return total;
 }
 
-function computeBestAiMove(board, aiColor, humanColor) {
-  if (state.moveCount === 0) {
-    return { r: 7, c: 7 };
-  }
+function getStageConfig(stage) {
+  const idx = Math.max(0, Math.min(AI_STAGES.length - 1, (stage || 1) - 1));
+  return AI_STAGES[idx];
+}
 
-  let bestMove = null;
-  let bestScore = -1;
-
+function getCandidateMoves(board, aiColor, humanColor, stageLevel) {
+  const candidates = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       if (board[r][c] !== 0) continue;
 
-      // Only evaluate cells near existing stones (within 2 cells) for fast & smart play
       let hasNeighbor = false;
       for (let dr = -2; dr <= 2 && !hasNeighbor; dr++) {
         for (let dc = -2; dc <= 2; dc++) {
@@ -774,7 +1021,6 @@ function computeBestAiMove(board, aiColor, humanColor) {
       const attackScore = scoreIntersectionForColor(board, r, c, aiColor);
       const defendScore = scoreIntersectionForColor(board, r, c, humanColor);
 
-      // Prioritize immediate win, then critical block, then combined tactical value
       let combined;
       if (attackScore >= 1000000) {
         combined = 10000000 + attackScore;
@@ -782,27 +1028,93 @@ function computeBestAiMove(board, aiColor, humanColor) {
         combined = 5000000 + defendScore;
       } else {
         const centerBias = 14 - (Math.abs(r - 7) + Math.abs(c - 7));
-        combined = attackScore * 1.08 + defendScore * 1.02 + centerBias + Math.random() * 6;
+        const atkW = stageLevel >= 7 ? 1.15 : 1.08;
+        const defW = stageLevel >= 5 ? 1.06 : stageLevel <= 2 ? 0.78 : 1.0;
+        combined = attackScore * atkW + defendScore * defW + centerBias + Math.random() * 4;
       }
 
-      if (combined > bestScore) {
-        bestScore = combined;
-        bestMove = { r, c };
-      }
+      candidates.push({ r, c, score: combined, attackScore, defendScore });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+function computeBestAiMove(board, aiColor, humanColor) {
+  if (state.moveCount === 0) {
+    return { r: 7, c: 7 };
+  }
+
+  const cfg = getStageConfig(state.singleStage);
+  const candidates = getCandidateMoves(board, aiColor, humanColor, cfg.level);
+  if (candidates.length === 0) return { r: 7, c: 7 };
+
+  // Immediate win or mandatory block
+  if (candidates[0].attackScore >= 1000000 || candidates[0].defendScore >= 1000000) {
+    return { r: candidates[0].r, c: candidates[0].c };
+  }
+
+  // Lower stages (Lv.1~4): occasional suboptimal move from topK
+  if (cfg.depth === 1) {
+    if (cfg.randChance > 0 && candidates.length > 1 && Math.random() < cfg.randChance) {
+      const poolSize = Math.min(cfg.topK, candidates.length);
+      const pick = candidates[Math.floor(Math.random() * poolSize)];
+      return { r: pick.r, c: pick.c };
+    }
+    return { r: candidates[0].r, c: candidates[0].c };
+  }
+
+  // Higher stages (Lv.6~10): 2-ply tactical lookahead on topK candidates
+  const limit = Math.min(cfg.topK, candidates.length);
+  let bestMove = candidates[0];
+  let bestNetScore = -Infinity;
+
+  for (let i = 0; i < limit; i++) {
+    const m = candidates[i];
+    board[m.r][m.c] = aiColor;
+    const oppReplies = getCandidateMoves(board, humanColor, aiColor, cfg.level);
+    const oppBest = oppReplies.length > 0 ? oppReplies[0].score : 0;
+    board[m.r][m.c] = 0;
+
+    const forkBonus = cfg.level >= 8 && m.attackScore >= 28000 ? 60000 : 0;
+    const netScore = m.score + forkBonus - oppBest * 0.72;
+    if (netScore > bestNetScore) {
+      bestNetScore = netScore;
+      bestMove = m;
     }
   }
 
-  return bestMove || { r: 7, c: 7 };
+  return { r: bestMove.r, c: bestMove.c };
 }
 
 // ==========================================
-// Single Play Flow
+// Single Play Flow (10 Stages, Best of 3)
 // ==========================================
-function startSinglePlayGame(swapFirst = false) {
+function startSinglePlayStage(stageNum = 1) {
   clearAiTimer();
+  clearTurnCountdown();
+  clearRoundTransitionTimers();
   syncNickname();
+
   state.mode = 'single';
-  state.oppNickname = 'AI';
+  state.singleStage = Math.max(1, Math.min(10, stageNum));
+  state.series = { round: 1, myWins: 0, oppWins: 0, draws: 0 };
+  state.isMatchOver = false;
+  state.abandonPenalized = false;
+
+  checkAndUpgradeBadge(state.singleStage, false);
+
+  const cfg = getStageConfig(state.singleStage);
+  state.oppNickname = `Lv.${cfg.level} ${cfg.name}`;
+  state.oppBadgeLevel = 0;
+
+  startSinglePlayRound(false);
+}
+
+function startSinglePlayRound(swapFirst = false) {
+  clearAiTimer();
+  clearRoundTransitionTimers();
+  state.mode = 'single';
 
   if (swapFirst) {
     state.myColor = state.myColor === 1 ? 2 : 1;
@@ -818,6 +1130,7 @@ function startSinglePlayGame(swapFirst = false) {
   state.winLine = null;
   state.hoverCell = null;
   state.isGameOver = false;
+  state.isRoundTransition = false;
   state.isWaitingOpponent = false;
 
   showScreen('game');
@@ -834,14 +1147,97 @@ function startSinglePlayGame(swapFirst = false) {
 function scheduleAiTurn() {
   clearAiTimer();
   aiTimerId = setTimeout(() => {
-    if (state.mode !== 'single' || state.isGameOver || state.turnColor !== state.oppColor) return;
+    if (
+      state.mode !== 'single' ||
+      state.isGameOver ||
+      state.isRoundTransition ||
+      state.turnColor !== state.oppColor
+    ) {
+      return;
+    }
     const move = computeBestAiMove(state.board, state.oppColor, state.myColor);
     applySinglePlayMove(move.r, move.c, state.oppColor);
   }, 360);
 }
 
+function finishSinglePlayRound(roundResult) {
+  state.isGameOver = true;
+  renderTurnTimerBadge();
+  drawOmokBoard();
+
+  if (roundResult === 'win') {
+    state.series.myWins += 1;
+    state.stats.single.me.wins += 1;
+    state.stats.single.ai.losses += 1;
+  } else if (roundResult === 'lose') {
+    state.series.oppWins += 1;
+    state.stats.single.me.losses += 1;
+    state.stats.single.ai.wins += 1;
+  } else {
+    state.series.draws += 1;
+    state.stats.single.me.draws += 1;
+    state.stats.single.ai.draws += 1;
+  }
+  saveStatsData();
+
+  const snapshot = { ...state.series };
+  const matchDecided = snapshot.myWins >= 2 || snapshot.oppWins >= 2;
+
+  playRoundTransitionOverlay(roundResult, snapshot, () => {
+    if (state.mode !== 'single' || state.screen !== 'game') return;
+
+    if (matchDecided) {
+      state.isMatchOver = true;
+      const didIWinSeries = snapshot.myWins >= 2;
+      if (didIWinSeries) {
+        if (state.singleStage >= 10) {
+          checkAndUpgradeBadge(10, true);
+          showGameOverModal('win', '💎 오목 달인에 등극하였습니다! (10단계 전체 클리어)', {
+            primaryText: '🔄 1단계부터',
+            primaryAction: () => startSinglePlayStage(1),
+            secondaryText: '🏠 메인화면',
+            secondaryAction: () => showScreen('menu'),
+            customTitle: '👑 오목 달인 등극!'
+          });
+        } else {
+          const nextStage = state.singleStage + 1;
+          const unlocked = checkAndUpgradeBadge(nextStage, false);
+          const nextCfg = getStageConfig(nextStage);
+          const badgeMsg = unlocked
+            ? ` · ${getBadgeOnly(state.bestBadgeLevel)} 마크 획득!`
+            : '';
+          showGameOverModal(
+            'win',
+            `STAGE ${state.singleStage} 승리! (${snapshot.myWins}승 ${snapshot.oppWins}패)${badgeMsg}`,
+            {
+              primaryText: `▶ 다음 단계 (Lv.${nextStage} ${nextCfg.name})`,
+              primaryAction: () => startSinglePlayStage(nextStage),
+              secondaryText: '🏠 메인화면',
+              secondaryAction: () => showScreen('menu')
+            }
+          );
+        }
+      } else {
+        showGameOverModal(
+          'lose',
+          `STAGE ${state.singleStage} 패배 (${snapshot.myWins}승 ${snapshot.oppWins}패)`,
+          {
+            primaryText: '🔄 1단계부터 다시 시작',
+            primaryAction: () => startSinglePlayStage(1),
+            secondaryText: '🏠 메인화면',
+            secondaryAction: () => showScreen('menu')
+          }
+        );
+      }
+    } else {
+      state.series.round += 1;
+      startSinglePlayRound(true);
+    }
+  });
+}
+
 function applySinglePlayMove(r, c, color) {
-  if (state.isGameOver || state.board[r][c] !== 0) return;
+  if (state.isGameOver || state.isRoundTransition || state.board[r][c] !== 0) return;
 
   clearTurnCountdown();
   state.board[r][c] = color;
@@ -852,33 +1248,13 @@ function applySinglePlayMove(r, c, color) {
   const winLine = checkFiveWin(state.board, r, c, color);
   if (winLine) {
     state.winLine = winLine;
-    state.isGameOver = true;
-    renderTurnTimerBadge();
-    drawOmokBoard();
-
     const didIWin = color === state.myColor;
-    if (didIWin) {
-      state.stats.single.me.wins += 1;
-      state.stats.single.ai.losses += 1;
-      saveStatsData();
-      showGameOverModal('win', '5 IN A ROW!');
-    } else {
-      state.stats.single.me.losses += 1;
-      state.stats.single.ai.wins += 1;
-      saveStatsData();
-      showGameOverModal('lose', 'AI MADE 5 IN A ROW');
-    }
+    finishSinglePlayRound(didIWin ? 'win' : 'lose');
     return;
   }
 
   if (state.moveCount >= BOARD_SIZE * BOARD_SIZE) {
-    state.isGameOver = true;
-    renderTurnTimerBadge();
-    drawOmokBoard();
-    state.stats.single.me.draws += 1;
-    state.stats.single.ai.draws += 1;
-    saveStatsData();
-    showGameOverModal('draw', 'FULL BOARD DRAW');
+    finishSinglePlayRound('draw');
     return;
   }
 
@@ -1088,6 +1464,13 @@ function connectServerlessRelay() {
 
   ws.onclose = () => {
     updateWsBadge('disconnected', 'OFFLINE');
+    if (transportMode === 'serverless' && state.screen !== 'menu') {
+      setTimeout(() => {
+        if (state.screen !== 'menu' && (!ws || ws.readyState === WebSocket.CLOSED)) {
+          connectServerlessRelay();
+        }
+      }, 2000);
+    }
   };
 
   ws.onerror = () => {
@@ -1161,6 +1544,57 @@ function sendToPeer(targetId, serverMsg) {
   }
 }
 
+let peerHeartbeatInterval = null;
+let oppLastSeenAt = 0;
+
+function stopPeerHeartbeat() {
+  if (peerHeartbeatInterval) {
+    clearInterval(peerHeartbeatInterval);
+    peerHeartbeatInterval = null;
+  }
+}
+
+function startPeerHeartbeat() {
+  stopPeerHeartbeat();
+  oppLastSeenAt = Date.now();
+  peerHeartbeatInterval = setInterval(() => {
+    if (transportMode !== 'serverless' || state.mode !== 'multi' || state.screen !== 'game') {
+      stopPeerHeartbeat();
+      return;
+    }
+    if (hostedRoom && hostedRoom.players.length >= 2) {
+      const guest = hostedRoom.players[1];
+      mqttPublish(TOPIC_PEER_PREFIX + guest.id, { kind: 'peer_hb', fromId: myClientId });
+    } else if (joinedHostId && joinedHostId !== myClientId) {
+      mqttPublish(TOPIC_PEER_PREFIX + joinedHostId, { kind: 'peer_hb', fromId: myClientId });
+    }
+
+    // Detect silent disconnect / force-killed browser of opponent (10s timeout)
+    if (
+      (state.multiStatus === 'playing' || state.multiStatus === 'round_pause') &&
+      oppLastSeenAt > 0 &&
+      Date.now() - oppLastSeenAt > 10500 &&
+      ws &&
+      ws.readyState === WebSocket.OPEN
+    ) {
+      stopPeerHeartbeat();
+      if (hostedRoom) {
+        closeHostedRoomAfterMatch();
+      } else {
+        joinedHostId = null;
+      }
+      state.multiStatus = 'finished';
+      state.isMatchOver = true;
+      state.stats.multi.me.wins += 1;
+      saveStatsData();
+      alert('상대방의 연결이 끊어져 1승을 획득했습니다! (OPPONENT DISCONNECTED +1 WIN)');
+      state.oppNickname = 'OPP';
+      showScreen('lobby');
+      wsSend({ type: 'get_rooms' });
+    }
+  }, 3000);
+}
+
 function announceHostedRoom() {
   if (!hostedRoom) return;
   mqttPublish(TOPIC_LOBBY, {
@@ -1169,12 +1603,30 @@ function announceHostedRoom() {
       id: hostedRoom.id,
       title: hostedRoom.title,
       hostId: myClientId,
-      hostName: hostedRoom.players[0] ? hostedRoom.players[0].nickname : state.nickname,
+      hostName: hostedRoom.players[0]
+        ? formatNameWithBadge(hostedRoom.players[0].nickname, hostedRoom.players[0].badgeLevel)
+        : formatNameWithBadge(state.nickname, state.bestBadgeLevel),
       playerCount: hostedRoom.players.length,
       maxPlayers: 2,
       status: hostedRoom.status
     }
   });
+}
+
+function clearHostedRoomTimers() {
+  if (!hostedRoom) return;
+  if (hostedRoom.turnTimer) {
+    clearTimeout(hostedRoom.turnTimer);
+    hostedRoom.turnTimer = null;
+  }
+  if (hostedRoom.readyTimer) {
+    clearTimeout(hostedRoom.readyTimer);
+    hostedRoom.readyTimer = null;
+  }
+  if (hostedRoom.roundTimer) {
+    clearTimeout(hostedRoom.roundTimer);
+    hostedRoom.roundTimer = null;
+  }
 }
 
 function clearHostedRoomTurnTimer() {
@@ -1186,7 +1638,8 @@ function clearHostedRoomTurnTimer() {
 
 function closeHostedRoomAfterMatch() {
   if (!hostedRoom) return;
-  clearHostedRoomTurnTimer();
+  clearHostedRoomTimers();
+  stopPeerHeartbeat();
   if (hostAnnounceInterval) {
     clearInterval(hostAnnounceInterval);
     hostAnnounceInterval = null;
@@ -1195,6 +1648,28 @@ function closeHostedRoomAfterMatch() {
   serverlessRooms.delete(hostedRoom.id);
   hostedRoom = null;
   joinedHostId = null;
+}
+
+function startHostedRoomReadyCountdown() {
+  if (!hostedRoom || hostedRoom.players.length < 2) return;
+  clearHostedRoomTimers();
+  hostedRoom.status = 'ready';
+  hostedRoom.readyDeadline = Date.now() + HOST_START_LIMIT_SEC * 1000;
+  hostedRoom.readyTimer = setTimeout(() => {
+    if (!hostedRoom || hostedRoom.status !== 'ready' || hostedRoom.players.length < 2) return;
+    beginHostedRoomMatch();
+  }, HOST_START_LIMIT_SEC * 1000);
+}
+
+function beginHostedRoomMatch() {
+  if (!hostedRoom || hostedRoom.players.length < 2) return;
+  clearHostedRoomTimers();
+  hostedRoom.series = { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 };
+  hostedRoom.blackIndex = 0;
+  resetHostedRoomBoardOnly(false);
+  hostedRoom.status = 'playing';
+  scheduleHostedRoomTurnTimer();
+  broadcastHostedRoomState();
 }
 
 function scheduleHostedRoomTurnTimer() {
@@ -1221,78 +1696,92 @@ function executeHostedRoomMove(moveColor, r, c) {
   const oppIdx = pIdx === 0 ? 1 : 0;
 
   const winLine = checkFiveWin(hostedRoom.board, r, c, moveColor);
-  if (winLine) {
-    hostedRoom.status = 'finished';
-    hostedRoom.winLine = winLine;
-    const winner = hostedRoom.players[pIdx];
-    const loser = hostedRoom.players[oppIdx];
-    winner.stats.wins += 1;
-    loser.stats.losses += 1;
+  const isBoardDraw = !winLine && hostedRoom.moveCount >= BOARD_SIZE * BOARD_SIZE;
 
-    for (const p of hostedRoom.players) {
+  if (winLine || isBoardDraw) {
+    clearHostedRoomTimers();
+    hostedRoom.status = 'round_pause';
+    hostedRoom.winLine = winLine || null;
+
+    const p0 = hostedRoom.players[0];
+    const p1 = hostedRoom.players[1];
+
+    if (winLine) {
+      if (pIdx === 0) hostedRoom.series.p0Wins += 1;
+      else hostedRoom.series.p1Wins += 1;
+      const winner = hostedRoom.players[pIdx];
+      const loser = hostedRoom.players[oppIdx];
+      winner.stats.wins += 1;
+      loser.stats.losses += 1;
+    } else {
+      hostedRoom.series.draws += 1;
+      p0.stats.draws += 1;
+      p1.stats.draws += 1;
+    }
+
+    const matchFinished = hostedRoom.series.p0Wins >= 2 || hostedRoom.series.p1Wins >= 2;
+    const winnerIdx = hostedRoom.series.p0Wins >= 2 ? 0 : hostedRoom.series.p1Wins >= 2 ? 1 : -1;
+    if (matchFinished) {
+      hostedRoom.status = 'finished';
+    }
+
+    for (let idx = 0; idx < hostedRoom.players.length; idx++) {
+      const p = hostedRoom.players[idx];
+      const opp = hostedRoom.players[idx === 0 ? 1 : 0];
+      const mySeriesWins = idx === 0 ? hostedRoom.series.p0Wins : hostedRoom.series.p1Wins;
+      const oppSeriesWins = idx === 0 ? hostedRoom.series.p1Wins : hostedRoom.series.p0Wins;
+      const roundResult = !winLine ? 'draw' : idx === pIdx ? 'win' : 'lose';
+      const matchResult = !matchFinished ? null : idx === winnerIdx ? 'win' : 'lose';
+
       sendToPeer(p.id, {
         type: 'stone_placed',
         r,
         c,
         color: moveColor,
         turnColor: hostedRoom.turnColor,
-        winLine
+        winLine: winLine || null,
+        roundResult,
+        matchFinished,
+        matchResult,
+        series: {
+          round: hostedRoom.series.round,
+          myWins: mySeriesWins,
+          oppWins: oppSeriesWins,
+          draws: hostedRoom.series.draws
+        },
+        meStats: p.stats,
+        oppStats: opp.stats
       });
     }
-    sendToPeer(winner.id, {
-      type: 'match_over',
-      result: 'win',
-      winnerColor: moveColor,
-      winLine,
-      meStats: winner.stats,
-      oppStats: loser.stats
-    });
-    sendToPeer(loser.id, {
-      type: 'match_over',
-      result: 'lose',
-      winnerColor: moveColor,
-      winLine,
-      meStats: loser.stats,
-      oppStats: winner.stats
-    });
-    closeHostedRoomAfterMatch();
-    return;
-  }
 
-  if (hostedRoom.moveCount >= BOARD_SIZE * BOARD_SIZE) {
-    hostedRoom.status = 'finished';
-    const p1 = hostedRoom.players[0];
-    const p2 = hostedRoom.players[1];
-    p1.stats.draws += 1;
-    p2.stats.draws += 1;
-
-    for (const p of hostedRoom.players) {
-      sendToPeer(p.id, {
-        type: 'stone_placed',
-        r,
-        c,
-        color: moveColor,
-        turnColor: hostedRoom.turnColor,
-        winLine: null
-      });
-    }
-    sendToPeer(p1.id, {
-      type: 'match_over',
-      result: 'draw',
-      winnerColor: 0,
-      winLine: null,
-      meStats: p1.stats,
-      oppStats: p2.stats
-    });
-    sendToPeer(p2.id, {
-      type: 'match_over',
-      result: 'draw',
-      winnerColor: 0,
-      winLine: null,
-      meStats: p2.stats,
-      oppStats: p1.stats
-    });
-    closeHostedRoomAfterMatch();
+    hostedRoom.roundTimer = setTimeout(() => {
+      if (!hostedRoom || hostedRoom.players.length < 2) return;
+      if (matchFinished) {
+        for (let idx = 0; idx < hostedRoom.players.length; idx++) {
+          const p = hostedRoom.players[idx];
+          const opp = hostedRoom.players[idx === 0 ? 1 : 0];
+          sendToPeer(p.id, {
+            type: 'match_over',
+            result: idx === winnerIdx ? 'win' : 'lose',
+            meStats: p.stats,
+            oppStats: opp.stats,
+            series: {
+              round: hostedRoom.series.round,
+              myWins: idx === 0 ? hostedRoom.series.p0Wins : hostedRoom.series.p1Wins,
+              oppWins: idx === 0 ? hostedRoom.series.p1Wins : hostedRoom.series.p0Wins,
+              draws: hostedRoom.series.draws
+            }
+          });
+        }
+        closeHostedRoomAfterMatch();
+      } else {
+        hostedRoom.series.round += 1;
+        resetHostedRoomBoardOnly(true);
+        hostedRoom.status = 'playing';
+        scheduleHostedRoomTurnTimer();
+        broadcastHostedRoomState();
+      }
+    }, 8200);
     return;
   }
 
@@ -1311,7 +1800,7 @@ function executeHostedRoomMove(moveColor, r, c) {
   }
 }
 
-function resetHostedRoomMatch(swapFirst = false) {
+function resetHostedRoomBoardOnly(swapFirst = false) {
   if (!hostedRoom) return;
   clearHostedRoomTurnTimer();
   hostedRoom.board = createEmptyBoard();
@@ -1324,10 +1813,6 @@ function resetHostedRoomMatch(swapFirst = false) {
     hostedRoom.blackIndex = 0;
   }
   hostedRoom.turnColor = 1;
-  hostedRoom.status = hostedRoom.players.length === 2 ? 'playing' : 'waiting';
-  if (hostedRoom.status === 'playing') {
-    scheduleHostedRoomTurnTimer();
-  }
 }
 
 function broadcastHostedRoomState() {
@@ -1338,6 +1823,8 @@ function broadcastHostedRoomState() {
     const opp = hostedRoom.players[oppIdx] || null;
     const myColor = idx === hostedRoom.blackIndex ? 1 : 2;
     const oppColor = myColor === 1 ? 2 : 1;
+    const myWins = idx === 0 ? hostedRoom.series.p0Wins : hostedRoom.series.p1Wins;
+    const oppWins = idx === 0 ? hostedRoom.series.p1Wins : hostedRoom.series.p0Wins;
 
     sendToPeer(p.id, {
       type: 'room_update',
@@ -1345,13 +1832,25 @@ function broadcastHostedRoomState() {
         id: hostedRoom.id,
         title: hostedRoom.title,
         status: hostedRoom.status,
+        isHost: idx === 0,
+        readySecondsLeft:
+          hostedRoom.status === 'ready' && hostedRoom.readyDeadline
+            ? Math.max(0, Math.ceil((hostedRoom.readyDeadline - Date.now()) / 1000))
+            : 0,
         turnColor: hostedRoom.turnColor,
         board: hostedRoom.board,
         lastMove: hostedRoom.lastMove,
         winLine: hostedRoom.winLine,
+        series: {
+          round: hostedRoom.series.round,
+          myWins,
+          oppWins,
+          draws: hostedRoom.series.draws
+        },
         me: {
           id: p.id,
           nickname: p.nickname,
+          badgeLevel: p.badgeLevel || 0,
           color: myColor,
           stats: p.stats
         },
@@ -1359,6 +1858,7 @@ function broadcastHostedRoomState() {
           ? {
               id: opp.id,
               nickname: opp.nickname,
+              badgeLevel: opp.badgeLevel || 0,
               color: oppColor,
               stats: opp.stats
             }
@@ -1388,7 +1888,10 @@ function handleServerlessPacket(topic, data) {
   }
 
   if (topic === TOPIC_PEER_PREFIX + myClientId) {
-    if (data.kind === 'server_msg') {
+    oppLastSeenAt = Date.now();
+    if (data.kind === 'peer_hb') {
+      return;
+    } else if (data.kind === 'server_msg') {
       handleServerMessage(data.msg);
     } else if (data.kind === 'peer_cmd' && hostedRoom) {
       handleHostPeerCommand(data);
@@ -1399,6 +1902,7 @@ function handleServerlessPacket(topic, data) {
 function handleHostPeerCommand(data) {
   if (!hostedRoom) return;
   const fromId = data.fromId;
+  oppLastSeenAt = Date.now();
 
   if (data.cmd === 'join_room') {
     if (hostedRoom.players.length >= 2) {
@@ -1408,11 +1912,20 @@ function handleHostPeerCommand(data) {
     hostedRoom.players.push({
       id: fromId,
       nickname: data.nickname || 'PLAYER',
+      badgeLevel: Number(data.badgeLevel) || 0,
       stats: sanitizeRecord(data.stats)
     });
     hostedRoom.blackIndex = 0;
-    resetHostedRoomMatch(false);
+    hostedRoom.series = { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 };
+    resetHostedRoomBoardOnly(false);
+    startHostedRoomReadyCountdown();
     broadcastHostedRoomState();
+    startPeerHeartbeat();
+  } else if (data.cmd === 'start_game') {
+    if (fromId !== myClientId || hostedRoom.players.length < 2) return;
+    if (hostedRoom.status === 'ready') {
+      beginHostedRoomMatch();
+    }
   } else if (data.cmd === 'place_stone') {
     if (hostedRoom.status !== 'playing' || hostedRoom.players.length < 2) return;
     const pIdx = hostedRoom.players.findIndex((p) => p.id === fromId);
@@ -1437,17 +1950,27 @@ function handleHostPeerCommand(data) {
     executeHostedRoomMove(myColor, r, c);
   } else if (data.cmd === 'play_again') {
     if (hostedRoom.players.length < 2) return;
-    resetHostedRoomMatch(true);
-    broadcastHostedRoomState();
+    beginHostedRoomMatch();
   } else if (data.cmd === 'leave_room') {
-    const wasPlaying = hostedRoom.status === 'playing';
-    hostedRoom.players = hostedRoom.players.filter((p) => p.id !== fromId);
-    hostedRoom.blackIndex = 0;
-    resetHostedRoomMatch(false);
-    broadcastHostedRoomState();
-    if (wasPlaying) {
-      handleServerMessage({ type: 'opponent_left', message: 'OPPONENT LEFT' });
+    const wasActive = hostedRoom.status === 'playing' || hostedRoom.status === 'round_pause';
+    const hostPlayer = hostedRoom.players[0];
+    closeHostedRoomAfterMatch();
+    if (wasActive && hostPlayer) {
+      hostPlayer.stats.wins += 1;
+      handleServerMessage({
+        type: 'opponent_left',
+        awardedWin: true,
+        meStats: hostPlayer.stats,
+        message: '상대방이 나가서 1승을 획득했습니다! (OPPONENT LEFT +1 WIN)'
+      });
+    } else {
+      handleServerMessage({
+        type: 'opponent_left',
+        awardedWin: false,
+        message: '상대방이 방을 나갔습니다.'
+      });
     }
+    handleServerMessage({ type: 'left_room', rooms: getServerlessRoomArray() });
   }
 }
 
@@ -1476,19 +1999,21 @@ function wsSend(obj) {
           {
             id: myClientId,
             nickname: state.nickname,
+            badgeLevel: state.bestBadgeLevel,
             stats: sanitizeRecord(state.stats.multi.me)
           }
         ],
         blackIndex: 0,
         turnColor: 1,
         status: 'waiting',
+        series: { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 },
         board: createEmptyBoard(),
         moveCount: 0,
         lastMove: null,
         winLine: null
       };
       joinedHostId = myClientId;
-      resetHostedRoomMatch(false);
+      resetHostedRoomBoardOnly(false);
       broadcastHostedRoomState();
       if (hostAnnounceInterval) clearInterval(hostAnnounceInterval);
       hostAnnounceInterval = setInterval(() => {
@@ -1501,15 +2026,23 @@ function wsSend(obj) {
       const targetRoom = serverlessRooms.get(obj.roomId);
       const hostId = targetRoom ? targetRoom.hostId : obj.roomId.replace('room_', '');
       joinedHostId = hostId;
+      startPeerHeartbeat();
       mqttPublish(TOPIC_PEER_PREFIX + hostId, {
         kind: 'peer_cmd',
         cmd: 'join_room',
         fromId: myClientId,
         nickname: state.nickname,
+        badgeLevel: state.bestBadgeLevel,
         stats: state.stats.multi.me
       });
       break;
     }
+
+    case 'start_game':
+      if (hostedRoom) {
+        handleHostPeerCommand({ cmd: 'start_game', fromId: myClientId });
+      }
+      break;
 
     case 'place_stone':
       if (hostedRoom) {
@@ -1538,18 +2071,29 @@ function wsSend(obj) {
       break;
 
     case 'leave_room':
+      stopPeerHeartbeat();
       if (hostedRoom) {
-        clearHostedRoomTurnTimer();
-        if (hostAnnounceInterval) clearInterval(hostAnnounceInterval);
+        const wasActive = hostedRoom.status === 'playing' || hostedRoom.status === 'round_pause';
         const guest = hostedRoom.players.find((p) => p.id !== myClientId);
         if (guest) {
-          sendToPeer(guest.id, { type: 'opponent_left', message: 'HOST LEFT' });
+          if (wasActive) {
+            guest.stats.wins += 1;
+            sendToPeer(guest.id, {
+              type: 'opponent_left',
+              awardedWin: true,
+              meStats: guest.stats,
+              message: '방장이 나가서 1승을 획득했습니다! (HOST LEFT +1 WIN)'
+            });
+          } else {
+            sendToPeer(guest.id, {
+              type: 'opponent_left',
+              awardedWin: false,
+              message: '방장이 방을 나가 대기실로 이동합니다.'
+            });
+          }
           sendToPeer(guest.id, { type: 'left_room', rooms: [] });
         }
-        mqttPublish(TOPIC_LOBBY, { kind: 'room_remove', roomId: hostedRoom.id });
-        serverlessRooms.delete(hostedRoom.id);
-        hostedRoom = null;
-        joinedHostId = null;
+        closeHostedRoomAfterMatch();
       } else if (joinedHostId) {
         mqttPublish(TOPIC_PEER_PREFIX + joinedHostId, {
           kind: 'peer_cmd',
@@ -1562,9 +2106,26 @@ function wsSend(obj) {
   }
 }
 
-window.addEventListener('beforeunload', () => {
+function handleAbandonOnExitEvent() {
+  penalizeActiveMatchAbandon(true);
   if (hostedRoom || joinedHostId) {
-    wsSend({ type: 'leave_room' });
+    wsSend({ type: 'leave_room', abandoned: true });
+  }
+}
+
+window.addEventListener('beforeunload', handleAbandonOnExitEvent);
+window.addEventListener('pagehide', handleAbandonOnExitEvent);
+window.addEventListener('popstate', () => {
+  if (state.screen === 'game') {
+    clearAiTimer();
+    penalizeActiveMatchAbandon(true);
+    if (state.mode === 'multi') {
+      wsSend({ type: 'leave_room', abandoned: true });
+      state.oppNickname = 'OPP';
+      showScreen('lobby');
+    } else {
+      showScreen('menu');
+    }
   }
 });
 
@@ -1587,6 +2148,12 @@ function handleServerMessage(msg) {
       break;
 
     case 'left_room':
+      stopPeerHeartbeat();
+      joinedHostId = null;
+      state.multiStatus = 'waiting';
+      state.isMatchOver = false;
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
       renderLobbyRoomList(msg.rooms || []);
       showScreen('lobby');
       break;
@@ -1604,6 +2171,17 @@ function handleServerMessage(msg) {
       break;
 
     case 'opponent_left':
+      stopPeerHeartbeat();
+      if (msg.awardedWin) {
+        if (msg.meStats) {
+          state.stats.multi.me = sanitizeRecord(msg.meStats);
+        } else {
+          state.stats.multi.me.wins += 1;
+        }
+        saveStatsData();
+      }
+      state.multiStatus = 'finished';
+      state.isMatchOver = true;
       alert(msg.message || 'OPPONENT LEFT');
       break;
   }
@@ -1631,7 +2209,11 @@ function renderLobbyRoomList(rooms) {
 
   container.innerHTML = '';
   rooms.forEach((r) => {
-    const isFull = r.playerCount >= r.maxPlayers || r.status === 'playing';
+    const isFull =
+      r.playerCount >= r.maxPlayers ||
+      r.status === 'playing' ||
+      r.status === 'ready' ||
+      r.status === 'round_pause';
     const item = document.createElement('div');
     item.className = 'room-item';
 
@@ -1655,6 +2237,7 @@ function renderLobbyRoomList(rooms) {
           type: 'join_room',
           roomId: r.id,
           nickname: state.nickname,
+          badgeLevel: state.bestBadgeLevel,
           stats: state.stats.multi.me
         });
       });
@@ -1663,9 +2246,72 @@ function renderLobbyRoomList(rooms) {
   });
 }
 
+function renderHostReadyOverlay() {
+  const overlay = document.getElementById('host-ready-overlay');
+  const title = document.getElementById('ready-title');
+  const sub = document.getElementById('ready-sub');
+  const btn = document.getElementById('btn-host-start');
+  if (!overlay || !title || !sub || !btn) return;
+
+  clearReadyCountdown();
+  if (state.mode !== 'multi' || state.multiStatus !== 'ready') {
+    overlay.classList.add('hidden');
+    return;
+  }
+
+  overlay.classList.remove('hidden');
+  let sec = state.readySecondsLeft > 0 ? state.readySecondsLeft : HOST_START_LIMIT_SEC;
+
+  const updateTexts = () => {
+    title.textContent = `${formatNameWithBadge(state.oppNickname, state.oppBadgeLevel)} 입장 완료!`;
+    if (state.isHost) {
+      sub.textContent = `${sec}초 안에 시작하지 않으면 자동 시작됩니다.`;
+      btn.classList.remove('hidden');
+      btn.textContent = `▶ START GAME (${sec}s)`;
+    } else {
+      sub.textContent = `방장이 게임을 시작할 때까지 대기 중... (${sec}s)`;
+      btn.classList.add('hidden');
+    }
+  };
+
+  updateTexts();
+  readyCountdownIntervalId = setInterval(() => {
+    if (state.mode !== 'multi' || state.multiStatus !== 'ready') {
+      clearReadyCountdown();
+      overlay.classList.add('hidden');
+      return;
+    }
+    sec = Math.max(0, sec - 1);
+    updateTexts();
+    if (sec <= 0) {
+      clearReadyCountdown();
+    }
+  }, 1000);
+}
+
 function handleMultiplayerRoomUpdate(room) {
   state.mode = 'multi';
   document.getElementById('gameover-modal').classList.add('hidden');
+  clearRoundTransitionTimers();
+  matchOverHandled = false;
+
+  state.multiStatus = room.status || 'waiting';
+  state.isHost = Boolean(room.isHost);
+  state.readySecondsLeft = Number(room.readySecondsLeft) || 0;
+  state.isRoundTransition = false;
+  state.isMatchOver = state.multiStatus === 'finished';
+  state.abandonPenalized = false;
+
+  if (room.series) {
+    state.series = {
+      round: Number(room.series.round) || 1,
+      myWins: Number(room.series.myWins) || 0,
+      oppWins: Number(room.series.oppWins) || 0,
+      draws: Number(room.series.draws) || 0
+    };
+  } else {
+    state.series = { round: 1, myWins: 0, oppWins: 0, draws: 0 };
+  }
 
   if (room.me) {
     state.myColor = room.me.color || 1;
@@ -1677,10 +2323,12 @@ function handleMultiplayerRoomUpdate(room) {
 
   if (room.opp) {
     state.oppNickname = room.opp.nickname || 'OPP';
+    state.oppBadgeLevel = Number(room.opp.badgeLevel) || 0;
     state.stats.multi.opp = sanitizeRecord(room.opp.stats);
     state.isWaitingOpponent = false;
   } else {
     state.oppNickname = 'WAIT...';
+    state.oppBadgeLevel = 0;
     state.stats.multi.opp = { wins: 0, losses: 0, draws: 0 };
     state.isWaitingOpponent = true;
   }
@@ -1689,25 +2337,98 @@ function handleMultiplayerRoomUpdate(room) {
   state.turnColor = room.turnColor || 1;
   state.lastMove = room.lastMove || null;
   state.winLine = room.winLine || null;
-  state.isGameOver = room.status === 'finished';
+  state.isGameOver = state.multiStatus === 'finished';
 
   if (state.screen !== 'game') {
     showScreen('game');
   }
 
+  renderHostReadyOverlay();
   updateTurnBannerUI();
   updateTopScoreHeader();
   startTurnCountdown();
   drawOmokBoard();
 }
 
+function showMultiMatchOverModal(result, seriesSnapshot) {
+  if (matchOverHandled) return;
+  matchOverHandled = true;
+  clearTurnCountdown();
+  clearRoundTransitionTimers();
+  stopPeerHeartbeat();
+
+  state.multiStatus = 'finished';
+  state.isGameOver = true;
+  state.isMatchOver = true;
+  joinedHostId = null;
+
+  renderTurnTimerBadge();
+  updateTurnBannerUI();
+  drawOmokBoard();
+
+  const w = (seriesSnapshot && seriesSnapshot.myWins) || state.series.myWins || 0;
+  const l = (seriesSnapshot && seriesSnapshot.oppWins) || state.series.oppWins || 0;
+  const subText =
+    result === 'win'
+      ? `3판 2승제 최종 승리! (${w}승 ${l}패)`
+      : `3판 2승제 최종 패배 (${w}승 ${l}패)`;
+
+  showGameOverModal(result, subText, {
+    primaryText: '🏢 대기실로 돌아가기',
+    primaryAction: () => {
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
+      showScreen('lobby');
+      wsSend({ type: 'get_rooms' });
+    },
+    secondaryText: '🏠 메인화면',
+    secondaryAction: () => {
+      state.mode = 'single';
+      state.oppNickname = 'AI';
+      showScreen('menu');
+    }
+  });
+}
+
 function handleMultiplayerStonePlaced(msg) {
+  if (state.mode !== 'multi') return;
   state.board[msg.r][msg.c] = msg.color;
   state.lastMove = { r: msg.r, c: msg.c, color: msg.color };
   state.turnColor = msg.turnColor;
   if (msg.winLine) state.winLine = msg.winLine;
 
   playStonePlaceSound(msg.color === 1);
+
+  if (msg.roundResult) {
+    clearTurnCountdown();
+    state.isGameOver = true;
+    state.multiStatus = msg.matchFinished ? 'finished' : 'round_pause';
+    if (msg.series) {
+      state.series = {
+        round: Number(msg.series.round) || state.series.round,
+        myWins: Number(msg.series.myWins) || 0,
+        oppWins: Number(msg.series.oppWins) || 0,
+        draws: Number(msg.series.draws) || 0
+      };
+    }
+    if (msg.meStats) state.stats.multi.me = sanitizeRecord(msg.meStats);
+    if (msg.oppStats) state.stats.multi.opp = sanitizeRecord(msg.oppStats);
+    saveStatsData();
+
+    renderTurnTimerBadge();
+    updateTurnBannerUI();
+    drawOmokBoard();
+
+    const snap = { ...state.series };
+    playRoundTransitionOverlay(msg.roundResult, snap, () => {
+      if (state.mode !== 'multi' || state.screen !== 'game') return;
+      if (msg.matchFinished) {
+        showMultiMatchOverModal(msg.matchResult || (snap.myWins >= 2 ? 'win' : 'lose'), snap);
+      }
+    });
+    return;
+  }
+
   updateTurnBannerUI();
   updateTopScoreHeader();
   if (!msg.winLine && !state.isGameOver) {
@@ -1717,67 +2438,65 @@ function handleMultiplayerStonePlaced(msg) {
 }
 
 function handleMultiplayerMatchOver(msg) {
-  clearTurnCountdown();
-  clearMultiReturnLobbyTimer();
-  state.isGameOver = true;
-  if (msg.winLine) state.winLine = msg.winLine;
-
   if (msg.meStats) state.stats.multi.me = sanitizeRecord(msg.meStats);
   if (msg.oppStats) state.stats.multi.opp = sanitizeRecord(msg.oppStats);
+  if (msg.series) {
+    state.series = {
+      round: Number(msg.series.round) || state.series.round,
+      myWins: Number(msg.series.myWins) || 0,
+      oppWins: Number(msg.series.oppWins) || 0,
+      draws: Number(msg.series.draws) || 0
+    };
+  }
   saveStatsData();
 
-  renderTurnTimerBadge();
-  updateTurnBannerUI();
-  drawOmokBoard();
-
-  let reasonText = '5 IN A ROW!';
-  if (msg.result === 'lose') {
-    reasonText = `${state.oppNickname} MADE 5 IN A ROW`;
-  } else if (msg.result === 'draw') {
-    reasonText = 'FULL BOARD DRAW';
-  }
-
-  showGameOverModal(msg.result, `${reasonText} (LOBBY IN 3s...)`, true);
-
-  // Clean up joined room reference and automatically return both host & guest to lobby after 3s
-  joinedHostId = null;
-  multiReturnLobbyTimerId = setTimeout(() => {
-    multiReturnLobbyTimerId = null;
-    if (state.mode === 'multi' && state.screen === 'game') {
-      state.oppNickname = 'OPP';
-      showScreen('lobby');
-      wsSend({ type: 'get_rooms' });
-    }
-  }, 3000);
+  // If round transition overlay is still finishing, let it finish before showing modal
+  if (state.isRoundTransition) return;
+  showMultiMatchOverModal(msg.result, state.series);
 }
 
 // ==========================================
 // Game Over Modal
 // ==========================================
-function showGameOverModal(result, subtitleText, isAutoLobby = false) {
+let modalPrimaryHandler = null;
+let modalSecondaryHandler = null;
+
+function showGameOverModal(result, subtitleText, options = {}) {
   playMatchSound(result);
   const modal = document.getElementById('gameover-modal');
   const badge = document.getElementById('modal-badge');
   const title = document.getElementById('modal-title');
   const sub = document.getElementById('modal-sub');
   const btnRow = document.getElementById('modal-btn-row');
+  const primaryBtn = document.getElementById('btn-play-again');
+  const secondaryBtn = document.getElementById('btn-modal-leave');
 
   if (btnRow) {
-    btnRow.classList.toggle('hidden', Boolean(isAutoLobby));
+    btnRow.classList.toggle('hidden', Boolean(options.isAutoLobby));
   }
 
   badge.className = `modal-badge ${result}`;
   if (result === 'win') {
     badge.textContent = 'VICTORY';
-    title.textContent = '🏆 YOU WIN!';
+    title.textContent = options.customTitle || '🏆 YOU WIN!';
   } else if (result === 'lose') {
     badge.textContent = 'DEFEAT';
-    title.textContent = '💔 YOU LOSE';
+    title.textContent = options.customTitle || '💔 YOU LOSE';
   } else {
     badge.textContent = 'DRAW';
-    title.textContent = '🤝 DRAW';
+    title.textContent = options.customTitle || '🤝 DRAW';
   }
   sub.textContent = subtitleText;
+
+  if (primaryBtn) {
+    primaryBtn.textContent = options.primaryText || '🔄 AGAIN';
+    modalPrimaryHandler = options.primaryAction || null;
+  }
+  if (secondaryBtn) {
+    secondaryBtn.textContent = options.secondaryText || '🚪 EXIT';
+    modalSecondaryHandler = options.secondaryAction || null;
+  }
+
   modal.classList.remove('hidden');
 }
 
@@ -1786,7 +2505,7 @@ function showGameOverModal(result, subtitleText, isAutoLobby = false) {
 // ==========================================
 function handleBoardClick(e) {
   getAudioContext();
-  if (state.screen !== 'game' || state.isGameOver || state.isWaitingOpponent) return;
+  if (!isPlayingTurnActive()) return;
   if (state.turnColor !== state.myColor) return;
 
   const cell = getCellFromPointerEvent(e);
@@ -1844,13 +2563,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Menu Mode Buttons
   document.getElementById('btn-mode-single').addEventListener('click', () => {
     if (!validateNicknameBeforePlay()) return;
-    startSinglePlayGame(false);
+    startSinglePlayStage(1);
   });
 
   document.getElementById('btn-mode-multi').addEventListener('click', () => {
     if (!validateNicknameBeforePlay()) return;
     state.mode = 'multi';
     state.oppNickname = 'OPP';
+    state.oppBadgeLevel = 0;
     showScreen('lobby');
     ensureWebSocketConnected();
   });
@@ -1871,6 +2591,7 @@ document.addEventListener('DOMContentLoaded', () => {
       type: 'create_room',
       title,
       nickname: state.nickname,
+      badgeLevel: state.bestBadgeLevel,
       stats: state.stats.multi.me
     });
     roomInput.value = '';
@@ -1881,12 +2602,27 @@ document.addEventListener('DOMContentLoaded', () => {
     wsSend({ type: 'get_rooms' });
   });
 
+  const hostStartBtn = document.getElementById('btn-host-start');
+  if (hostStartBtn) {
+    hostStartBtn.addEventListener('click', () => {
+      if (state.mode === 'multi' && state.isHost && state.multiStatus === 'ready') {
+        wsSend({ type: 'start_game' });
+      }
+    });
+  }
+
   // Game Screen Buttons
   document.getElementById('btn-leave-game').addEventListener('click', () => {
     clearAiTimer();
+    const penalized = penalizeActiveMatchAbandon(true);
     if (state.mode === 'multi') {
-      wsSend({ type: 'leave_room' });
+      if (!penalized) {
+        wsSend({ type: 'leave_room' });
+      }
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
       showScreen('lobby');
+      wsSend({ type: 'get_rooms' });
     } else {
       showScreen('menu');
     }
@@ -1894,8 +2630,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-new-game').addEventListener('click', () => {
     if (state.mode === 'single') {
-      startSinglePlayGame(true);
-    } else {
+      penalizeActiveMatchAbandon(false);
+      startSinglePlayStage(1);
+    } else if (state.isMatchOver) {
       document.getElementById('gameover-modal').classList.add('hidden');
       wsSend({ type: 'play_again', stats: state.stats.multi.me });
     }
@@ -1904,8 +2641,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modal Buttons
   document.getElementById('btn-play-again').addEventListener('click', () => {
     document.getElementById('gameover-modal').classList.add('hidden');
+    if (modalPrimaryHandler) {
+      const fn = modalPrimaryHandler;
+      modalPrimaryHandler = null;
+      fn();
+      return;
+    }
     if (state.mode === 'single') {
-      startSinglePlayGame(true);
+      startSinglePlayStage(1);
     } else {
       wsSend({ type: 'play_again', stats: state.stats.multi.me });
     }
@@ -1914,6 +2657,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-modal-leave').addEventListener('click', () => {
     document.getElementById('gameover-modal').classList.add('hidden');
     clearAiTimer();
+    if (modalSecondaryHandler) {
+      const fn = modalSecondaryHandler;
+      modalSecondaryHandler = null;
+      fn();
+      return;
+    }
     if (state.mode === 'multi') {
       wsSend({ type: 'leave_room' });
       showScreen('lobby');
