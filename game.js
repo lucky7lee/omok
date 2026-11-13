@@ -547,7 +547,7 @@ function playRoundTransitionOverlay(roundResult, seriesSnapshot, onComplete) {
 
   const resultLabel =
     roundResult === 'win' ? '🎉 이겼다!' : roundResult === 'lose' ? '💔 졌다!' : '🤝 비겼다!';
-  let sec = 5;
+  let sec = 3;
   main.textContent = resultLabel;
   sub.textContent = `${sec}초 후 결과 집계...`;
   overlay.classList.remove('hidden');
@@ -1781,7 +1781,7 @@ function executeHostedRoomMove(moveColor, r, c) {
         scheduleHostedRoomTurnTimer();
         broadcastHostedRoomState();
       }
-    }, 8200);
+    }, 6200);
     return;
   }
 

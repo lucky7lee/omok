@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3010;
 const BOARD_SIZE = 15;
 const TURN_LIMIT_MS = 30000;
 const HOST_START_LIMIT_MS = 30000;
-const ROUND_TRANSITION_MS = 8200; // 5s result + 3s series score
+const ROUND_TRANSITION_MS = 6200; // 3s result + 3s series score
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',

@@ -1,10 +1,10 @@
 // Service Worker for OMOK PWA Desktop & Android Home Screen Installation
-const CACHE_NAME = 'omok-pwa-v6';
+const CACHE_NAME = 'omok-pwa-v7';
 const ASSETS = [
   './',
   './index.html',
-  './style.css?v=6',
-  './game.js?v=6',
+  './style.css?v=7',
+  './game.js?v=7',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
