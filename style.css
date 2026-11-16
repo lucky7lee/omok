@@ -758,13 +758,37 @@ button {
   font-size: 0.84rem;
   font-weight: 700;
   color: #64748b;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   line-height: 1.35;
+}
+
+.modal-rematch-note {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 12px;
 }
 
 .modal-btn-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.btn-modal-primary,
+.btn-modal-secondary {
+  flex: 1 1 auto;
+  min-width: 92px;
+  cursor: pointer;
+}
+
+.btn-modal-primary:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
 .btn-modal-primary {

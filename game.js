@@ -642,6 +642,7 @@ function showScreen(screenName) {
     clearMultiReturnLobbyTimer();
     clearReadyCountdown();
     clearRoundTransitionTimers();
+    clearRematchCountdown();
     const readyOv = document.getElementById('host-ready-overlay');
     if (readyOv) readyOv.classList.add('hidden');
   }
@@ -1627,6 +1628,38 @@ function clearHostedRoomTimers() {
     clearTimeout(hostedRoom.roundTimer);
     hostedRoom.roundTimer = null;
   }
+  if (hostedRoom.rematchTimer) {
+    clearTimeout(hostedRoom.rematchTimer);
+    hostedRoom.rematchTimer = null;
+  }
+}
+
+function startHostedRoomRematchTimer() {
+  if (!hostedRoom) return;
+  if (hostedRoom.rematchTimer) {
+    clearTimeout(hostedRoom.rematchTimer);
+    hostedRoom.rematchTimer = null;
+  }
+  hostedRoom.rematchVotes = new Set();
+  hostedRoom.rematchTimer = setTimeout(() => {
+    if (!hostedRoom || hostedRoom.status !== 'finished') return;
+    const guest = hostedRoom.players.find((p) => p.id !== myClientId);
+    if (guest) {
+      sendToPeer(guest.id, {
+        type: 'opponent_left',
+        awardedWin: false,
+        message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+      });
+      sendToPeer(guest.id, { type: 'left_room', rooms: [] });
+    }
+    closeHostedRoomAfterMatch();
+    handleServerMessage({
+      type: 'opponent_left',
+      awardedWin: false,
+      message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+    });
+    handleServerMessage({ type: 'left_room', rooms: getServerlessRoomArray() });
+  }, 30000);
 }
 
 function clearHostedRoomTurnTimer() {
@@ -1757,12 +1790,14 @@ function executeHostedRoomMove(moveColor, r, c) {
     hostedRoom.roundTimer = setTimeout(() => {
       if (!hostedRoom || hostedRoom.players.length < 2) return;
       if (matchFinished) {
+        startHostedRoomRematchTimer();
         for (let idx = 0; idx < hostedRoom.players.length; idx++) {
           const p = hostedRoom.players[idx];
           const opp = hostedRoom.players[idx === 0 ? 1 : 0];
           sendToPeer(p.id, {
             type: 'match_over',
             result: idx === winnerIdx ? 'win' : 'lose',
+            rematchSecondsLeft: 30,
             meStats: p.stats,
             oppStats: opp.stats,
             series: {
@@ -1773,7 +1808,6 @@ function executeHostedRoomMove(moveColor, r, c) {
             }
           });
         }
-        closeHostedRoomAfterMatch();
       } else {
         hostedRoom.series.round += 1;
         resetHostedRoomBoardOnly(true);
@@ -1950,9 +1984,23 @@ function handleHostPeerCommand(data) {
     executeHostedRoomMove(myColor, r, c);
   } else if (data.cmd === 'play_again') {
     if (hostedRoom.players.length < 2) return;
-    beginHostedRoomMatch();
+    if (!hostedRoom.rematchVotes) hostedRoom.rematchVotes = new Set();
+    hostedRoom.rematchVotes.add(fromId);
+    if (hostedRoom.rematchVotes.size >= 2) {
+      hostedRoom.rematchVotes.clear();
+      beginHostedRoomMatch();
+    } else {
+      for (const p of hostedRoom.players) {
+        sendToPeer(p.id, {
+          type: 'rematch_status',
+          myRequested: hostedRoom.rematchVotes.has(p.id),
+          oppRequested: hostedRoom.rematchVotes.size > 0 && !hostedRoom.rematchVotes.has(p.id)
+        });
+      }
+    }
   } else if (data.cmd === 'leave_room') {
     const wasActive = hostedRoom.status === 'playing' || hostedRoom.status === 'round_pause';
+    const wasFinished = hostedRoom.status === 'finished';
     const hostPlayer = hostedRoom.players[0];
     closeHostedRoomAfterMatch();
     if (wasActive && hostPlayer) {
@@ -1967,7 +2015,7 @@ function handleHostPeerCommand(data) {
       handleServerMessage({
         type: 'opponent_left',
         awardedWin: false,
-        message: '상대방이 방을 나갔습니다.'
+        message: wasFinished ? '상대방이 나가서 대기실로 이동합니다.' : '상대방이 방을 나갔습니다.'
       });
     }
     handleServerMessage({ type: 'left_room', rooms: getServerlessRoomArray() });
@@ -2088,7 +2136,10 @@ function wsSend(obj) {
             sendToPeer(guest.id, {
               type: 'opponent_left',
               awardedWin: false,
-              message: '방장이 방을 나가 대기실로 이동합니다.'
+              message:
+                hostedRoom.status === 'finished'
+                  ? '상대방이 나가서 대기실로 이동합니다.'
+                  : '방장이 방을 나가 대기실로 이동합니다.'
             });
           }
           sendToPeer(guest.id, { type: 'left_room', rooms: [] });
@@ -2149,6 +2200,7 @@ function handleServerMessage(msg) {
 
     case 'left_room':
       stopPeerHeartbeat();
+      clearRematchCountdown();
       joinedHostId = null;
       state.multiStatus = 'waiting';
       state.isMatchOver = false;
@@ -2159,6 +2211,7 @@ function handleServerMessage(msg) {
       break;
 
     case 'room_update':
+      clearRematchCountdown();
       handleMultiplayerRoomUpdate(msg.room);
       break;
 
@@ -2168,6 +2221,10 @@ function handleServerMessage(msg) {
 
     case 'match_over':
       handleMultiplayerMatchOver(msg);
+      break;
+
+    case 'rematch_status':
+      updateRematchModalStatus(Boolean(msg.myRequested), Boolean(msg.oppRequested));
       break;
 
     case 'opponent_left':
@@ -2213,7 +2270,8 @@ function renderLobbyRoomList(rooms) {
       r.playerCount >= r.maxPlayers ||
       r.status === 'playing' ||
       r.status === 'ready' ||
-      r.status === 'round_pause';
+      r.status === 'round_pause' ||
+      r.status === 'finished';
     const item = document.createElement('div');
     item.className = 'room-item';
 
@@ -2350,17 +2408,58 @@ function handleMultiplayerRoomUpdate(room) {
   drawOmokBoard();
 }
 
+let rematchCountdownIntervalId = null;
+let rematchSecondsLeft = 30;
+let rematchMyRequested = false;
+let rematchOppRequested = false;
+
+function clearRematchCountdown() {
+  if (rematchCountdownIntervalId) {
+    clearInterval(rematchCountdownIntervalId);
+    rematchCountdownIntervalId = null;
+  }
+  rematchMyRequested = false;
+  rematchOppRequested = false;
+  const note = document.getElementById('modal-rematch-note');
+  if (note) note.classList.add('hidden');
+  const primaryBtn = document.getElementById('btn-play-again');
+  if (primaryBtn) primaryBtn.disabled = false;
+}
+
+function updateRematchModalStatus(myReq, oppReq) {
+  rematchMyRequested = myReq;
+  rematchOppRequested = oppReq;
+  const note = document.getElementById('modal-rematch-note');
+  const primaryBtn = document.getElementById('btn-play-again');
+  if (primaryBtn) {
+    primaryBtn.disabled = myReq;
+    primaryBtn.textContent = myReq
+      ? `⏳ 대기 중 (${rematchSecondsLeft}s)`
+      : `🔄 재대결 (${rematchSecondsLeft}s)`;
+  }
+  if (note) {
+    note.classList.remove('hidden');
+    if (myReq) {
+      note.textContent = `상대방의 재대결 선택을 기다리는 중... (${rematchSecondsLeft}초 후 자동 퇴장)`;
+    } else if (oppReq) {
+      note.textContent = `🔥 상대방이 재대결을 요청했습니다! (${rematchSecondsLeft}초 안에 선택)`;
+    } else {
+      note.textContent = `30초 안에 선택하지 않으면 자동으로 대기실로 이동합니다. (${rematchSecondsLeft}s)`;
+    }
+  }
+}
+
 function showMultiMatchOverModal(result, seriesSnapshot) {
   if (matchOverHandled) return;
   matchOverHandled = true;
   clearTurnCountdown();
   clearRoundTransitionTimers();
+  clearRematchCountdown();
   stopPeerHeartbeat();
 
   state.multiStatus = 'finished';
   state.isGameOver = true;
   state.isMatchOver = true;
-  joinedHostId = null;
 
   renderTurnTimerBadge();
   updateTurnBannerUI();
@@ -2373,21 +2472,52 @@ function showMultiMatchOverModal(result, seriesSnapshot) {
       ? `3판 2승제 최종 승리! (${w}승 ${l}패)`
       : `3판 2승제 최종 패배 (${w}승 ${l}패)`;
 
+  rematchSecondsLeft = 30;
   showGameOverModal(result, subText, {
-    primaryText: '🏢 대기실로 돌아가기',
+    keepModalOpenOnPrimary: true,
+    primaryText: `🔄 재대결 (${rematchSecondsLeft}s)`,
     primaryAction: () => {
+      if (rematchMyRequested) return;
+      updateRematchModalStatus(true, rematchOppRequested);
+      wsSend({ type: 'play_again', stats: state.stats.multi.me });
+    },
+    secondaryText: '🏢 대기실',
+    secondaryAction: () => {
+      clearRematchCountdown();
+      wsSend({ type: 'leave_room' });
       state.oppNickname = 'OPP';
       state.oppBadgeLevel = 0;
       showScreen('lobby');
       wsSend({ type: 'get_rooms' });
     },
-    secondaryText: '🏠 메인화면',
-    secondaryAction: () => {
+    tertiaryText: '🏠 메인화면',
+    tertiaryAction: () => {
+      clearRematchCountdown();
+      wsSend({ type: 'leave_room' });
       state.mode = 'single';
       state.oppNickname = 'AI';
+      state.oppBadgeLevel = 0;
       showScreen('menu');
     }
   });
+
+  updateRematchModalStatus(false, false);
+  rematchCountdownIntervalId = setInterval(() => {
+    if (state.mode !== 'multi' || state.screen !== 'game' || state.multiStatus !== 'finished') {
+      clearRematchCountdown();
+      return;
+    }
+    rematchSecondsLeft = Math.max(0, rematchSecondsLeft - 1);
+    updateRematchModalStatus(rematchMyRequested, rematchOppRequested);
+    if (rematchSecondsLeft <= 0) {
+      clearRematchCountdown();
+      wsSend({ type: 'leave_room' });
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
+      showScreen('lobby');
+      wsSend({ type: 'get_rooms' });
+    }
+  }, 1000);
 }
 
 function handleMultiplayerStonePlaced(msg) {
@@ -2460,6 +2590,8 @@ function handleMultiplayerMatchOver(msg) {
 // ==========================================
 let modalPrimaryHandler = null;
 let modalSecondaryHandler = null;
+let modalTertiaryHandler = null;
+let modalKeepOpenOnPrimary = false;
 
 function showGameOverModal(result, subtitleText, options = {}) {
   playMatchSound(result);
@@ -2467,12 +2599,19 @@ function showGameOverModal(result, subtitleText, options = {}) {
   const badge = document.getElementById('modal-badge');
   const title = document.getElementById('modal-title');
   const sub = document.getElementById('modal-sub');
+  const note = document.getElementById('modal-rematch-note');
   const btnRow = document.getElementById('modal-btn-row');
   const primaryBtn = document.getElementById('btn-play-again');
   const secondaryBtn = document.getElementById('btn-modal-leave');
+  const tertiaryBtn = document.getElementById('btn-modal-tertiary');
+
+  modalKeepOpenOnPrimary = Boolean(options.keepModalOpenOnPrimary);
 
   if (btnRow) {
     btnRow.classList.toggle('hidden', Boolean(options.isAutoLobby));
+  }
+  if (note && !options.keepModalOpenOnPrimary) {
+    note.classList.add('hidden');
   }
 
   badge.className = `modal-badge ${result}`;
@@ -2489,12 +2628,23 @@ function showGameOverModal(result, subtitleText, options = {}) {
   sub.textContent = subtitleText;
 
   if (primaryBtn) {
+    primaryBtn.disabled = false;
     primaryBtn.textContent = options.primaryText || '🔄 AGAIN';
     modalPrimaryHandler = options.primaryAction || null;
   }
   if (secondaryBtn) {
     secondaryBtn.textContent = options.secondaryText || '🚪 EXIT';
     modalSecondaryHandler = options.secondaryAction || null;
+  }
+  if (tertiaryBtn) {
+    if (options.tertiaryText) {
+      tertiaryBtn.textContent = options.tertiaryText;
+      tertiaryBtn.classList.remove('hidden');
+      modalTertiaryHandler = options.tertiaryAction || null;
+    } else {
+      tertiaryBtn.classList.add('hidden');
+      modalTertiaryHandler = null;
+    }
   }
 
   modal.classList.remove('hidden');
@@ -2640,10 +2790,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Modal Buttons
   document.getElementById('btn-play-again').addEventListener('click', () => {
-    document.getElementById('gameover-modal').classList.add('hidden');
+    if (!modalKeepOpenOnPrimary) {
+      document.getElementById('gameover-modal').classList.add('hidden');
+    }
     if (modalPrimaryHandler) {
       const fn = modalPrimaryHandler;
-      modalPrimaryHandler = null;
+      if (!modalKeepOpenOnPrimary) {
+        modalPrimaryHandler = null;
+      }
       fn();
       return;
     }
@@ -2670,6 +2824,19 @@ document.addEventListener('DOMContentLoaded', () => {
       showScreen('menu');
     }
   });
+
+  const tertiaryModalBtn = document.getElementById('btn-modal-tertiary');
+  if (tertiaryModalBtn) {
+    tertiaryModalBtn.addEventListener('click', () => {
+      document.getElementById('gameover-modal').classList.add('hidden');
+      clearAiTimer();
+      if (modalTertiaryHandler) {
+        const fn = modalTertiaryHandler;
+        modalTertiaryHandler = null;
+        fn();
+      }
+    });
+  }
 
   // Header Tools
   const soundBtn = document.getElementById('btn-sound-toggle');

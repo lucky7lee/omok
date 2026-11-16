@@ -15,6 +15,7 @@ const BOARD_SIZE = 15;
 const TURN_LIMIT_MS = 30000;
 const HOST_START_LIMIT_MS = 30000;
 const ROUND_TRANSITION_MS = 6200; // 3s result + 3s series score
+const REMATCH_LIMIT_MS = 30000;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -372,6 +373,32 @@ function clearRoomTimers(room) {
     clearTimeout(room.roundTimer);
     room.roundTimer = null;
   }
+  if (room.rematchTimer) {
+    clearTimeout(room.rematchTimer);
+    room.rematchTimer = null;
+  }
+}
+
+function startRoomRematchTimer(room) {
+  if (!room) return;
+  if (room.rematchTimer) {
+    clearTimeout(room.rematchTimer);
+    room.rematchTimer = null;
+  }
+  room.rematchVotes = new Set();
+  room.rematchTimer = setTimeout(() => {
+    if (!rooms.has(room.id) || room.status !== 'finished') return;
+    const playersCopy = [...room.players];
+    closeAndRemoveRoom(room);
+    for (const p of playersCopy) {
+      sendJson(p, {
+        type: 'opponent_left',
+        awardedWin: false,
+        message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+      });
+      sendJson(p, { type: 'left_room', rooms: getPublicRoomList() });
+    }
+  }, REMATCH_LIMIT_MS);
 }
 
 function clearRoomTurnTimer(room) {
@@ -519,12 +546,14 @@ function executeRoomMove(room, moveColor, r, c) {
     room.roundTimer = setTimeout(() => {
       if (!rooms.has(room.id) || room.players.length < 2) return;
       if (matchFinished) {
+        startRoomRematchTimer(room);
         for (let idx = 0; idx < room.players.length; idx++) {
           const p = room.players[idx];
           const opp = room.players[idx === 0 ? 1 : 0];
           sendJson(p, {
             type: 'match_over',
             result: idx === winnerIdx ? 'win' : 'lose',
+            rematchSecondsLeft: 30,
             meStats: p.stats,
             oppStats: opp.stats,
             series: {
@@ -535,7 +564,6 @@ function executeRoomMove(room, moveColor, r, c) {
             }
           });
         }
-        closeAndRemoveRoom(room);
       } else {
         room.series.round += 1;
         resetRoomBoardOnly(room, true);
@@ -777,7 +805,20 @@ function handleClientMessage(client, msg) {
       const room = rooms.get(client.roomId);
       if (!room || room.players.length < 2) return;
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
-      beginRoomMatch(room);
+      if (!room.rematchVotes) room.rematchVotes = new Set();
+      room.rematchVotes.add(client.id);
+      if (room.rematchVotes.size >= 2) {
+        room.rematchVotes.clear();
+        beginRoomMatch(room);
+      } else {
+        for (const p of room.players) {
+          sendJson(p, {
+            type: 'rematch_status',
+            myRequested: room.rematchVotes.has(p.id),
+            oppRequested: room.rematchVotes.size > 0 && !room.rematchVotes.has(p.id)
+          });
+        }
+      }
       break;
     }
 
@@ -799,6 +840,7 @@ function leaveCurrentRoom(client) {
 
   const isHostLeaving = room.hostId === client.id;
   const wasActiveMatch = room.status === 'playing' || room.status === 'round_pause';
+  const wasFinished = room.status === 'finished';
   clearRoomTimers(room);
 
   const remaining = room.players.filter((p) => p.id !== client.id);
@@ -816,11 +858,13 @@ function leaveCurrentRoom(client) {
         meStats: survivor.stats,
         message: '상대방이 나가서 1승을 획득했습니다! (OPPONENT LEFT +1 WIN)'
       });
-    } else if (isHostLeaving) {
+    } else if (wasFinished || isHostLeaving) {
       sendJson(survivor, {
         type: 'opponent_left',
         awardedWin: false,
-        message: '방장이 방을 나가 대기실로 이동합니다.'
+        message: wasFinished
+          ? '상대방이 나가서 대기실로 이동합니다.'
+          : '방장이 방을 나가 대기실로 이동합니다.'
       });
     }
     sendJson(survivor, { type: 'left_room', rooms: getPublicRoomList() });
