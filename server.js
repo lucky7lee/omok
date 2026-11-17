@@ -556,6 +556,8 @@ function executeRoomMove(room, moveColor, r, c) {
       }
 
       room.turnColor = moveColor === 1 ? 2 : 1;
+      room.winLine = null;
+      room.status = 'playing';
       scheduleRoomTurnTimer(room);
 
       for (const p of room.players) {
@@ -568,6 +570,7 @@ function executeRoomMove(room, moveColor, r, c) {
           winLine: null,
           bombExploded: true,
           bombCenter: { r, c },
+          bombCenters: room.bombCenters,
           board: room.board
         });
       }

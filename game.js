@@ -1638,6 +1638,9 @@ function applySinglePlayMove(r, c, color) {
 
       state.moveCount += 1;
       state.lastMove = { r, c, color };
+      state.winLine = null;
+      state.isGameOver = false;
+      state.isRoundTransition = false;
       playExplosionSound();
       shakeOmokBoard();
 
@@ -2164,6 +2167,8 @@ function executeHostedRoomMove(moveColor, r, c) {
       hostedRoom.moveCount += 1;
       hostedRoom.lastMove = { r, c, color: moveColor };
       hostedRoom.turnColor = moveColor === 1 ? 2 : 1;
+      hostedRoom.winLine = null;
+      hostedRoom.status = 'playing';
       scheduleHostedRoomTurnTimer();
 
       for (const p of hostedRoom.players) {
@@ -3014,6 +3019,9 @@ function handleMultiplayerStonePlaced(msg) {
     }
     state.lastMove = { r: msg.r, c: msg.c, color: msg.color };
     state.turnColor = msg.turnColor;
+    state.winLine = null;
+    state.isGameOver = false;
+    state.isRoundTransition = false;
     playExplosionSound();
     shakeOmokBoard();
 
