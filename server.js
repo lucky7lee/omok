@@ -359,6 +359,41 @@ function getRandomEmptyCell(board) {
   return empty[Math.floor(Math.random() * empty.length)];
 }
 
+// Item War Constants: 3 = Lake, 4 = Mountain, 5 = Bomb Ruin
+function generateItemWarObstacles(board) {
+  const emptyCoords = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) emptyCoords.push({ r, c });
+    }
+  }
+  const chosen = [];
+  for (let i = 0; i < 3 && emptyCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * emptyCoords.length);
+    chosen.push(emptyCoords.splice(idx, 1)[0]);
+  }
+  const types = Math.random() < 0.5 ? [3, 3, 4] : [3, 4, 4];
+  chosen.forEach((spot, i) => {
+    board[spot.r][spot.c] = types[i];
+  });
+  return chosen;
+}
+
+function generateItemWarBombs(board) {
+  const emptyCoords = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) emptyCoords.push({ r, c });
+    }
+  }
+  const bombs = [];
+  for (let i = 0; i < 2 && emptyCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * emptyCoords.length);
+    bombs.push(emptyCoords.splice(idx, 1)[0]);
+  }
+  return bombs;
+}
+
 function clearRoomTimers(room) {
   if (!room) return;
   if (room.turnTimer) {
@@ -449,6 +484,14 @@ function resetRoomBoardOnly(room, swapFirstPlayer = false) {
   room.moveCount = 0;
   room.lastMove = null;
   room.winLine = null;
+  room.hiddenBombs = [];
+  room.bombCenters = [];
+
+  if (room.gameMode === 'item') {
+    generateItemWarObstacles(room.board);
+    room.hiddenBombs = generateItemWarBombs(room.board);
+  }
+
   if (swapFirstPlayer && room.players.length === 2) {
     room.blackIndex = room.blackIndex === 0 ? 1 : 0;
   } else if (typeof room.blackIndex !== 'number') {
@@ -472,6 +515,52 @@ function scheduleRoomTurnTimer(room) {
 function executeRoomMove(room, moveColor, r, c) {
   if (!room || room.status !== 'playing' || room.players.length < 2) return;
   if (room.board[r][c] !== 0) return;
+
+  // Check hidden bomb detonation in Item War
+  if (room.gameMode === 'item' && Array.isArray(room.hiddenBombs)) {
+    const bIdx = room.hiddenBombs.findIndex((b) => b.r === r && b.c === c);
+    if (bIdx !== -1) {
+      clearRoomTurnTimer(room);
+      room.hiddenBombs.splice(bIdx, 1);
+      if (!room.bombCenters) room.bombCenters = [];
+      room.bombCenters.push({ r, c });
+
+      const crossOffsets = [
+        [0, 0],
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1]
+      ];
+      for (const [dr, dc] of crossOffsets) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+          if (room.board[nr][nc] !== 3 && room.board[nr][nc] !== 4) {
+            room.board[nr][nc] = 5;
+          }
+        }
+      }
+
+      room.turnColor = moveColor === 1 ? 2 : 1;
+      scheduleRoomTurnTimer(room);
+
+      for (const p of room.players) {
+        sendJson(p, {
+          type: 'stone_placed',
+          r,
+          c,
+          color: moveColor,
+          turnColor: room.turnColor,
+          winLine: null,
+          bombExploded: true,
+          bombCenter: { r, c },
+          board: room.board
+        });
+      }
+      return;
+    }
+  }
 
   clearRoomTurnTimer(room);
   room.board[r][c] = moveColor;
@@ -608,6 +697,7 @@ function getPublicRoomList() {
     list.push({
       id: room.id,
       title: room.title,
+      gameMode: room.gameMode || 'original',
       hostName: room.players[0] ? room.players[0].nickname : '-',
       playerCount: room.players.length,
       maxPlayers: 2,
@@ -641,6 +731,8 @@ function sendRoomStateToPlayers(room) {
       room: {
         id: room.id,
         title: room.title,
+        gameMode: room.gameMode || 'original',
+        bombCenters: room.bombCenters || [],
         status: room.status,
         isHost: idx === 0,
         readySecondsLeft:
@@ -708,10 +800,12 @@ function handleClientMessage(client, msg) {
       if (msg.stats) client.stats = sanitizeStats(msg.stats);
 
       const roomTitle = String(msg.title || `${client.nickname}'S ROOM`).trim().slice(0, 24);
+      const gameMode = msg.gameMode === 'item' ? 'item' : 'original';
       const roomId = `room_${nextRoomId++}`;
       const room = {
         id: roomId,
         title: roomTitle,
+        gameMode,
         hostId: client.id,
         players: [client],
         blackIndex: 0,
@@ -721,7 +815,9 @@ function handleClientMessage(client, msg) {
         board: createEmptyBoard(),
         moveCount: 0,
         lastMove: null,
-        winLine: null
+        winLine: null,
+        hiddenBombs: [],
+        bombCenters: []
       };
       client.roomId = roomId;
       rooms.set(roomId, room);

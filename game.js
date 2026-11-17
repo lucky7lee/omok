@@ -29,6 +29,7 @@ const AI_STAGES = [
 const state = {
   screen: 'menu', // 'menu' | 'lobby' | 'game'
   mode: 'single', // 'single' | 'multi'
+  gameMode: 'original', // 'original' | 'item'
   nickname: '',
   oppNickname: 'AI',
   oppBadgeLevel: 0,
@@ -46,6 +47,8 @@ const state = {
   turnSecondsLeft: TURN_LIMIT_SEC,
 
   board: createEmptyBoard(),
+  hiddenBombs: [],
+  bombCenters: [],
   moveCount: 0,
   lastMove: null,
   winLine: null,
@@ -159,6 +162,41 @@ function clearMultiReturnLobbyTimer() {
 
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
+}
+
+// Item War Constants: 3 = Lake, 4 = Mountain, 5 = Bomb Ruin
+function generateItemWarObstacles(board) {
+  const emptyCoords = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) emptyCoords.push({ r, c });
+    }
+  }
+  const chosen = [];
+  for (let i = 0; i < 3 && emptyCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * emptyCoords.length);
+    chosen.push(emptyCoords.splice(idx, 1)[0]);
+  }
+  const types = Math.random() < 0.5 ? [3, 3, 4] : [3, 4, 4];
+  chosen.forEach((spot, i) => {
+    board[spot.r][spot.c] = types[i];
+  });
+  return chosen;
+}
+
+function generateItemWarBombs(board) {
+  const emptyCoords = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] === 0) emptyCoords.push({ r, c });
+    }
+  }
+  const bombs = [];
+  for (let i = 0; i < 2 && emptyCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * emptyCoords.length);
+    bombs.push(emptyCoords.splice(idx, 1)[0]);
+  }
+  return bombs;
 }
 
 function getRandomEmptyCell(board) {
@@ -391,6 +429,65 @@ function playTickWarningSound() {
   osc.stop(now + 0.065);
 }
 
+// Deep Bomb Explosion Sound Effect (Punch + Low Rumble)
+function playExplosionSound() {
+  if (!state.soundEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // 1) Low frequency boom punch
+  const osc = ctx.createOscillator();
+  const oscGain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, now);
+  osc.frequency.exponentialRampToValueAtTime(30, now + 0.48);
+
+  oscGain.gain.setValueAtTime(0.75, now);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+
+  osc.connect(oscGain);
+  oscGain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.55);
+
+  // 2) Explosion noise rumble
+  const noiseLen = Math.floor(ctx.sampleRate * 0.65);
+  const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < noiseLen; i++) {
+    const env = Math.exp(-i / (ctx.sampleRate * 0.12));
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+  const noiseSrc = ctx.createBufferSource();
+  noiseSrc.buffer = noiseBuf;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(850, now);
+  filter.frequency.exponentialRampToValueAtTime(80, now + 0.62);
+
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.8, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+
+  noiseSrc.connect(filter);
+  filter.connect(noiseGain);
+  noiseGain.connect(ctx.destination);
+  noiseSrc.start(now);
+}
+
+function shakeOmokBoard() {
+  const wrapper = document.querySelector('.board-wrapper');
+  if (!wrapper) return;
+  wrapper.classList.remove('shake-board');
+  void wrapper.offsetWidth;
+  wrapper.classList.add('shake-board');
+  setTimeout(() => {
+    wrapper.classList.remove('shake-board');
+  }, 450);
+}
+
 // ==========================================
 // Stats Persistence & Top Score Header UI
 // ==========================================
@@ -509,7 +606,11 @@ function updateBo3Scoreboard() {
   mePipsEl.textContent = myPips;
   meWinsEl.textContent = String(s.myWins);
 
-  stageTagEl.textContent = state.mode === 'single' ? `STAGE ${state.singleStage}/10` : 'MULTI · BO3';
+  const modeTag = state.gameMode === 'item' ? '💣 ITEM' : '⚔️ ORIG';
+  stageTagEl.textContent =
+    state.mode === 'single'
+      ? `STAGE ${state.singleStage}/10 · ${modeTag}`
+      : `MULTI · ${modeTag}`;
   roundTagEl.textContent = `R${s.round} (${s.myWins}승 ${s.oppWins}패${s.draws > 0 ? ` ${s.draws}무` : ''})`;
 }
 
@@ -764,25 +865,49 @@ function drawOmokBoard() {
     state.turnColor === state.myColor
   ) {
     const { r, c } = state.hoverCell;
+    const hx = pad + c * step;
+    const hy = pad + r * step;
     if (state.board[r][c] === 0) {
-      const hx = pad + c * step;
-      const hy = pad + r * step;
       ctx.save();
       ctx.globalAlpha = 0.38;
       drawSingleStone(ctx, hx, hy, step * 0.44, state.myColor);
       ctx.restore();
+    } else {
+      // Lake, Mountain, Ruin, or Occupied: Blocked Indicator
+      ctx.save();
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.72)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(hx, hy, step * 0.38, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(hx - step * 0.26, hy - step * 0.26);
+      ctx.lineTo(hx + step * 0.26, hy + step * 0.26);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
-  // Placed stones
+  // Placed stones & Item War elements (Lakes, Mountains, Ruins)
   const stoneRadius = step * 0.45;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
-      const color = state.board[r][c];
-      if (color !== 0) {
+      const cellVal = state.board[r][c];
+      if (cellVal !== 0) {
         const x = pad + c * step;
         const y = pad + r * step;
-        drawSingleStone(ctx, x, y, stoneRadius, color);
+        if (cellVal === 1 || cellVal === 2) {
+          drawSingleStone(ctx, x, y, stoneRadius, cellVal);
+        } else if (cellVal === 3) {
+          drawLake(ctx, x, y, stoneRadius);
+        } else if (cellVal === 4) {
+          drawMountain(ctx, x, y, stoneRadius);
+        } else if (cellVal === 5) {
+          const isCenter =
+            Array.isArray(state.bombCenters) &&
+            state.bombCenters.some((b) => b.r === r && b.c === c);
+          drawBombRuin(ctx, x, y, stoneRadius, isCenter);
+        }
       }
     }
   }
@@ -876,6 +1001,203 @@ function drawSingleStone(ctx, x, y, radius, color) {
   ctx.lineWidth = 1;
   ctx.strokeStyle = color === 1 ? '#020617' : '#94a3b8';
   ctx.stroke();
+  ctx.restore();
+}
+
+// Realistic Lake Obstacle (Emerald water, ripple waves & lily pad)
+function drawLake(ctx, x, y, radius) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(12, 74, 110, 0.4)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 2;
+
+  // Sandy / earthy natural shoreline
+  ctx.fillStyle = '#b45309';
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 1.08, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Lake water body gradient
+  ctx.shadowColor = 'transparent';
+  const waterGrad = ctx.createRadialGradient(
+    x - radius * 0.28,
+    y - radius * 0.28,
+    radius * 0.1,
+    x,
+    y,
+    radius
+  );
+  waterGrad.addColorStop(0, '#38bdf8');
+  waterGrad.addColorStop(0.42, '#0284c7');
+  waterGrad.addColorStop(0.82, '#0369a1');
+  waterGrad.addColorStop(1, '#082f49');
+  ctx.fillStyle = waterGrad;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.96, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Water ripples
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.1, y - radius * 0.15, radius * 0.44, 0.2, Math.PI * 0.7);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(x + radius * 0.15, y + radius * 0.15, radius * 0.32, Math.PI, Math.PI * 1.6);
+  ctx.stroke();
+
+  // Water lily pad
+  ctx.fillStyle = '#16a34a';
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.35, y + radius * 0.25, radius * 0.22, 0, Math.PI * 1.75);
+  ctx.fill();
+
+  // Water lily flower bud
+  ctx.fillStyle = '#fef08a';
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.35, y + radius * 0.25, radius * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// Realistic Mountain Obstacle (3D Rocky peak, snow cap & crevice shadows)
+function drawMountain(ctx, x, y, radius) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.5)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 3;
+
+  const topY = y - radius * 1.08;
+  const leftX = x - radius * 1.08;
+  const rightX = x + radius * 1.08;
+  const botY = y + radius * 0.98;
+
+  // Left lighted face
+  const lightGrad = ctx.createLinearGradient(leftX, topY, x, botY);
+  lightGrad.addColorStop(0, '#94a3b8');
+  lightGrad.addColorStop(0.5, '#64748b');
+  lightGrad.addColorStop(1, '#475569');
+
+  ctx.fillStyle = lightGrad;
+  ctx.beginPath();
+  ctx.moveTo(x, topY);
+  ctx.lineTo(leftX, botY);
+  ctx.lineTo(x, botY + 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Right shaded face
+  ctx.shadowColor = 'transparent';
+  const shadeGrad = ctx.createLinearGradient(x, topY, rightX, botY);
+  shadeGrad.addColorStop(0, '#475569');
+  shadeGrad.addColorStop(0.5, '#334155');
+  shadeGrad.addColorStop(1, '#1e293b');
+
+  ctx.fillStyle = shadeGrad;
+  ctx.beginPath();
+  ctx.moveTo(x, topY);
+  ctx.lineTo(rightX, botY);
+  ctx.lineTo(x, botY + 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Central jagged ridge line
+  ctx.strokeStyle = '#0f172a';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(x, topY);
+  ctx.lineTo(x - radius * 0.05, y - radius * 0.2);
+  ctx.lineTo(x + radius * 0.08, y + radius * 0.3);
+  ctx.lineTo(x, botY);
+  ctx.stroke();
+
+  // Snow cap on peak
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(x, topY);
+  ctx.lineTo(x - radius * 0.42, y - radius * 0.35);
+  ctx.lineTo(x - radius * 0.15, y - radius * 0.25);
+  ctx.lineTo(x, y - radius * 0.4);
+  ctx.lineTo(x + radius * 0.2, y - radius * 0.28);
+  ctx.lineTo(x + radius * 0.42, y - radius * 0.35);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// Bomb Blast Crater & Ruin Debris (Charred earth, crack fissures, glowing embers)
+function drawBombRuin(ctx, x, y, radius, isCenter) {
+  ctx.save();
+  // Charred ground gradient
+  const blastGrad = ctx.createRadialGradient(x, y, radius * 0.15, x, y, radius * 1.15);
+  blastGrad.addColorStop(0, '#09090b');
+  blastGrad.addColorStop(0.45, '#27272a');
+  blastGrad.addColorStop(0.78, '#450a0a');
+  blastGrad.addColorStop(1, 'rgba(69, 10, 10, 0)');
+
+  ctx.fillStyle = blastGrad;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 1.15, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Blast crack lines
+  ctx.strokeStyle = '#18181b';
+  ctx.lineWidth = 1.4;
+  const angles = [0.2, 0.85, 1.45, 2.15, 2.85, 3.65, 4.35, 5.25];
+  for (const a of angles) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const mx = x + Math.cos(a) * (radius * 0.65);
+    const my = y + Math.sin(a) * (radius * 0.65);
+    const ex = x + Math.cos(a + 0.15) * (radius * 1.05);
+    const ey = y + Math.sin(a + 0.15) * (radius * 1.05);
+    ctx.lineTo(mx, my);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+
+  // Debris rock fragments
+  ctx.fillStyle = '#3f3f46';
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.4, y - radius * 0.3, radius * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + radius * 0.35, y + radius * 0.35, radius * 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glowing hot embers
+  ctx.fillStyle = '#ea580c';
+  ctx.beginPath();
+  ctx.arc(x + radius * 0.25, y - radius * 0.3, radius * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.25, y + radius * 0.25, radius * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (isCenter) {
+    // Deep center crater hole
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Metallic bomb shell shard
+    ctx.fillStyle = '#71717a';
+    ctx.strokeStyle = '#27272a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - radius * 0.15, y - radius * 0.25);
+    ctx.lineTo(x + radius * 0.2, y - radius * 0.15);
+    ctx.lineTo(x + radius * 0.05, y + radius * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -1091,13 +1413,14 @@ function computeBestAiMove(board, aiColor, humanColor) {
 // ==========================================
 // Single Play Flow (10 Stages, Best of 3)
 // ==========================================
-function startSinglePlayStage(stageNum = 1) {
+function startSinglePlayStage(stageNum = 1, gameMode) {
   clearAiTimer();
   clearTurnCountdown();
   clearRoundTransitionTimers();
   syncNickname();
 
   state.mode = 'single';
+  state.gameMode = gameMode || state.gameMode || 'original';
   state.singleStage = Math.max(1, Math.min(10, stageNum));
   state.series = { round: 1, myWins: 0, oppWins: 0, draws: 0 };
   state.isMatchOver = false;
@@ -1126,6 +1449,13 @@ function startSinglePlayRound(swapFirst = false) {
   state.turnColor = 1;
 
   state.board = createEmptyBoard();
+  state.bombCenters = [];
+  if (state.gameMode === 'item') {
+    generateItemWarObstacles(state.board);
+    state.hiddenBombs = generateItemWarBombs(state.board);
+  } else {
+    state.hiddenBombs = [];
+  }
   state.moveCount = 0;
   state.lastMove = null;
   state.winLine = null;
@@ -1195,7 +1525,7 @@ function finishSinglePlayRound(roundResult) {
           checkAndUpgradeBadge(10, true);
           showGameOverModal('win', '💎 오목 달인에 등극하였습니다! (10단계 전체 클리어)', {
             primaryText: '🔄 1단계부터',
-            primaryAction: () => startSinglePlayStage(1),
+            primaryAction: () => startSinglePlayStage(1, state.gameMode),
             secondaryText: '🏠 메인화면',
             secondaryAction: () => showScreen('menu'),
             customTitle: '👑 오목 달인 등극!'
@@ -1212,7 +1542,7 @@ function finishSinglePlayRound(roundResult) {
             `STAGE ${state.singleStage} 승리! (${snapshot.myWins}승 ${snapshot.oppWins}패)${badgeMsg}`,
             {
               primaryText: `▶ 다음 단계 (Lv.${nextStage} ${nextCfg.name})`,
-              primaryAction: () => startSinglePlayStage(nextStage),
+              primaryAction: () => startSinglePlayStage(nextStage, state.gameMode),
               secondaryText: '🏠 메인화면',
               secondaryAction: () => showScreen('menu')
             }
@@ -1224,7 +1554,7 @@ function finishSinglePlayRound(roundResult) {
           `STAGE ${state.singleStage} 패배 (${snapshot.myWins}승 ${snapshot.oppWins}패)`,
           {
             primaryText: '🔄 1단계부터 다시 시작',
-            primaryAction: () => startSinglePlayStage(1),
+            primaryAction: () => startSinglePlayStage(1, state.gameMode),
             secondaryText: '🏠 메인화면',
             secondaryAction: () => showScreen('menu')
           }
@@ -1241,6 +1571,50 @@ function applySinglePlayMove(r, c, color) {
   if (state.isGameOver || state.isRoundTransition || state.board[r][c] !== 0) return;
 
   clearTurnCountdown();
+
+  // Item War Hidden Bomb Detonation Check
+  if (state.gameMode === 'item' && Array.isArray(state.hiddenBombs)) {
+    const bombIdx = state.hiddenBombs.findIndex((b) => b.r === r && b.c === c);
+    if (bombIdx !== -1) {
+      state.hiddenBombs.splice(bombIdx, 1);
+      if (!Array.isArray(state.bombCenters)) state.bombCenters = [];
+      state.bombCenters.push({ r, c });
+
+      const blastOffsets = [
+        [0, 0],
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1]
+      ];
+      blastOffsets.forEach(([dr, dc]) => {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+          if (state.board[nr][nc] !== 3 && state.board[nr][nc] !== 4) {
+            state.board[nr][nc] = 5;
+          }
+        }
+      });
+
+      state.moveCount += 1;
+      state.lastMove = { r, c, color };
+      playExplosionSound();
+      shakeOmokBoard();
+
+      state.turnColor = color === 1 ? 2 : 1;
+      updateTurnBannerUI();
+      updateTopScoreHeader();
+      startTurnCountdown();
+      drawOmokBoard();
+
+      if (state.turnColor === state.oppColor) {
+        scheduleAiTurn();
+      }
+      return;
+    }
+  }
+
   state.board[r][c] = color;
   state.moveCount += 1;
   state.lastMove = { r, c, color };
@@ -1603,6 +1977,7 @@ function announceHostedRoom() {
     room: {
       id: hostedRoom.id,
       title: hostedRoom.title,
+      gameMode: hostedRoom.gameMode || 'original',
       hostId: myClientId,
       hostName: hostedRoom.players[0]
         ? formatNameWithBadge(hostedRoom.players[0].nickname, hostedRoom.players[0].badgeLevel)
@@ -1721,6 +2096,55 @@ function executeHostedRoomMove(moveColor, r, c) {
   if (hostedRoom.board[r][c] !== 0) return;
 
   clearHostedRoomTurnTimer();
+
+  // Item War Hidden Bomb Detonation Check
+  if (hostedRoom.gameMode === 'item' && Array.isArray(hostedRoom.hiddenBombs)) {
+    const bombIdx = hostedRoom.hiddenBombs.findIndex((b) => b.r === r && b.c === c);
+    if (bombIdx !== -1) {
+      hostedRoom.hiddenBombs.splice(bombIdx, 1);
+      if (!Array.isArray(hostedRoom.bombCenters)) hostedRoom.bombCenters = [];
+      hostedRoom.bombCenters.push({ r, c });
+
+      const blastOffsets = [
+        [0, 0],
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1]
+      ];
+      blastOffsets.forEach(([dr, dc]) => {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+          if (hostedRoom.board[nr][nc] !== 3 && hostedRoom.board[nr][nc] !== 4) {
+            hostedRoom.board[nr][nc] = 5;
+          }
+        }
+      });
+
+      hostedRoom.moveCount += 1;
+      hostedRoom.lastMove = { r, c, color: moveColor };
+      hostedRoom.turnColor = moveColor === 1 ? 2 : 1;
+      scheduleHostedRoomTurnTimer();
+
+      for (const p of hostedRoom.players) {
+        sendToPeer(p.id, {
+          type: 'stone_placed',
+          r,
+          c,
+          color: moveColor,
+          turnColor: hostedRoom.turnColor,
+          winLine: null,
+          bombExploded: true,
+          bombCenter: { r, c },
+          bombCenters: hostedRoom.bombCenters,
+          board: hostedRoom.board
+        });
+      }
+      return;
+    }
+  }
+
   hostedRoom.board[r][c] = moveColor;
   hostedRoom.moveCount += 1;
   hostedRoom.lastMove = { r, c, color: moveColor };
@@ -1838,6 +2262,12 @@ function resetHostedRoomBoardOnly(swapFirst = false) {
   if (!hostedRoom) return;
   clearHostedRoomTurnTimer();
   hostedRoom.board = createEmptyBoard();
+  hostedRoom.hiddenBombs = [];
+  hostedRoom.bombCenters = [];
+  if (hostedRoom.gameMode === 'item') {
+    generateItemWarObstacles(hostedRoom.board);
+    hostedRoom.hiddenBombs = generateItemWarBombs(hostedRoom.board);
+  }
   hostedRoom.moveCount = 0;
   hostedRoom.lastMove = null;
   hostedRoom.winLine = null;
@@ -1865,6 +2295,8 @@ function broadcastHostedRoomState() {
       room: {
         id: hostedRoom.id,
         title: hostedRoom.title,
+        gameMode: hostedRoom.gameMode || 'original',
+        bombCenters: hostedRoom.bombCenters || [],
         status: hostedRoom.status,
         isHost: idx === 0,
         readySecondsLeft:
@@ -2040,9 +2472,11 @@ function wsSend(obj) {
 
     case 'create_room': {
       const roomId = 'room_' + myClientId;
+      const gameMode = obj.gameMode || state.gameMode || 'original';
       hostedRoom = {
         id: roomId,
         title: obj.title || `${state.nickname}'S ROOM`,
+        gameMode,
         players: [
           {
             id: myClientId,
@@ -2056,6 +2490,8 @@ function wsSend(obj) {
         status: 'waiting',
         series: { round: 1, p0Wins: 0, p1Wins: 0, draws: 0 },
         board: createEmptyBoard(),
+        hiddenBombs: [],
+        bombCenters: [],
         moveCount: 0,
         lastMove: null,
         winLine: null
@@ -2272,12 +2708,16 @@ function renderLobbyRoomList(rooms) {
       r.status === 'ready' ||
       r.status === 'round_pause' ||
       r.status === 'finished';
+    const modeBadge =
+      r.gameMode === 'item'
+        ? '<span class="room-mode-tag item">💣 ITEM</span>'
+        : '<span class="room-mode-tag orig">⚔️ ORIG</span>';
     const item = document.createElement('div');
     item.className = 'room-item';
 
     item.innerHTML = `
       <div class="room-info">
-        <div class="room-title">${escapeHtml(r.title)}</div>
+        <div class="room-title">${escapeHtml(r.title)} ${modeBadge}</div>
         <div class="room-host">👤 ${escapeHtml(r.hostName)}</div>
       </div>
       <div class="room-right">
@@ -2349,6 +2789,8 @@ function renderHostReadyOverlay() {
 
 function handleMultiplayerRoomUpdate(room) {
   state.mode = 'multi';
+  state.gameMode = room.gameMode || 'original';
+  state.bombCenters = Array.isArray(room.bombCenters) ? room.bombCenters : [];
   document.getElementById('gameover-modal').classList.add('hidden');
   clearRoundTransitionTimers();
   matchOverHandled = false;
@@ -2522,6 +2964,29 @@ function showMultiMatchOverModal(result, seriesSnapshot) {
 
 function handleMultiplayerStonePlaced(msg) {
   if (state.mode !== 'multi') return;
+
+  if (msg.bombExploded) {
+    if (msg.board) state.board = msg.board;
+    if (Array.isArray(msg.bombCenters)) {
+      state.bombCenters = msg.bombCenters;
+    } else if (msg.bombCenter) {
+      if (!Array.isArray(state.bombCenters)) state.bombCenters = [];
+      state.bombCenters.push(msg.bombCenter);
+    }
+    state.lastMove = { r: msg.r, c: msg.c, color: msg.color };
+    state.turnColor = msg.turnColor;
+    playExplosionSound();
+    shakeOmokBoard();
+
+    updateTurnBannerUI();
+    updateTopScoreHeader();
+    if (!state.isGameOver) {
+      startTurnCountdown();
+    }
+    drawOmokBoard();
+    return;
+  }
+
   state.board[msg.r][msg.c] = msg.color;
   state.lastMove = { r: msg.r, c: msg.c, color: msg.color };
   state.turnColor = msg.turnColor;
@@ -2711,19 +3176,68 @@ document.addEventListener('DOMContentLoaded', () => {
   nickInput.addEventListener('blur', syncNickname);
 
   // Menu Mode Buttons
-  document.getElementById('btn-mode-single').addEventListener('click', () => {
-    if (!validateNicknameBeforePlay()) return;
-    startSinglePlayStage(1);
-  });
+  const singleOrigBtn = document.getElementById('btn-mode-single-orig');
+  if (singleOrigBtn) {
+    singleOrigBtn.addEventListener('click', () => {
+      if (!validateNicknameBeforePlay()) return;
+      state.gameMode = 'original';
+      startSinglePlayStage(1, 'original');
+    });
+  }
 
-  document.getElementById('btn-mode-multi').addEventListener('click', () => {
-    if (!validateNicknameBeforePlay()) return;
-    state.mode = 'multi';
-    state.oppNickname = 'OPP';
-    state.oppBadgeLevel = 0;
-    showScreen('lobby');
-    ensureWebSocketConnected();
-  });
+  const singleItemBtn = document.getElementById('btn-mode-single-item');
+  if (singleItemBtn) {
+    singleItemBtn.addEventListener('click', () => {
+      if (!validateNicknameBeforePlay()) return;
+      state.gameMode = 'item';
+      startSinglePlayStage(1, 'item');
+    });
+  }
+
+  const multiOrigBtn = document.getElementById('btn-mode-multi-orig');
+  if (multiOrigBtn) {
+    multiOrigBtn.addEventListener('click', () => {
+      if (!validateNicknameBeforePlay()) return;
+      state.mode = 'multi';
+      state.gameMode = 'original';
+      const modeSelect = document.getElementById('select-room-mode');
+      if (modeSelect) modeSelect.value = 'original';
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
+      showScreen('lobby');
+      ensureWebSocketConnected();
+    });
+  }
+
+  const multiItemBtn = document.getElementById('btn-mode-multi-item');
+  if (multiItemBtn) {
+    multiItemBtn.addEventListener('click', () => {
+      if (!validateNicknameBeforePlay()) return;
+      state.mode = 'multi';
+      state.gameMode = 'item';
+      const modeSelect = document.getElementById('select-room-mode');
+      if (modeSelect) modeSelect.value = 'item';
+      state.oppNickname = 'OPP';
+      state.oppBadgeLevel = 0;
+      showScreen('lobby');
+      ensureWebSocketConnected();
+    });
+  }
+
+  // Game Rules Modal
+  const openRulesBtn = document.getElementById('btn-open-rules');
+  const closeRulesBtn = document.getElementById('btn-close-rules');
+  const rulesModal = document.getElementById('rules-modal');
+  if (openRulesBtn && rulesModal) {
+    openRulesBtn.addEventListener('click', () => {
+      rulesModal.classList.remove('hidden');
+    });
+  }
+  if (closeRulesBtn && rulesModal) {
+    closeRulesBtn.addEventListener('click', () => {
+      rulesModal.classList.add('hidden');
+    });
+  }
 
   // Lobby Buttons
   document.getElementById('btn-lobby-back').addEventListener('click', () => {
@@ -2737,9 +3251,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureWebSocketConnected();
     const roomInput = document.getElementById('input-room-title');
     const title = roomInput.value.trim() || `${state.nickname}'S ROOM`;
+    const modeSelect = document.getElementById('select-room-mode');
+    const gameMode = modeSelect ? modeSelect.value : (state.gameMode || 'original');
     wsSend({
       type: 'create_room',
       title,
+      gameMode,
       nickname: state.nickname,
       badgeLevel: state.bestBadgeLevel,
       stats: state.stats.multi.me
@@ -2781,7 +3298,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-new-game').addEventListener('click', () => {
     if (state.mode === 'single') {
       penalizeActiveMatchAbandon(false);
-      startSinglePlayStage(1);
+      startSinglePlayStage(1, state.gameMode);
     } else if (state.isMatchOver) {
       document.getElementById('gameover-modal').classList.add('hidden');
       wsSend({ type: 'play_again', stats: state.stats.multi.me });
@@ -2802,7 +3319,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (state.mode === 'single') {
-      startSinglePlayStage(1);
+      startSinglePlayStage(1, state.gameMode);
     } else {
       wsSend({ type: 'play_again', stats: state.stats.multi.me });
     }

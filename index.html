@@ -13,7 +13,7 @@
   <link rel="Shortcut Icon" href="favicon.ico" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <title>OMOK - Single &amp; Multi</title>
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
 </head>
 <body>
   <div class="game-container">
@@ -86,21 +86,50 @@
           <p id="id-warning-msg" class="id-warning-msg hidden">⚠️ ID를 정한 후에 게임을 진행해 주세요! (PLEASE ENTER ID)</p>
         </div>
 
-        <div class="mode-grid">
-          <!-- SINGLE PLAY -->
-          <button id="btn-mode-single" class="mode-card single-mode" type="button">
-            <div class="mode-art">🤖</div>
-            <div class="mode-name">SINGLE</div>
-            <div class="mode-sub">10 STAGES · BO3</div>
-            <div class="mode-go">PLAY ▶</div>
-          </button>
+        <div class="mode-grid-wrap">
+          <div class="mode-grid">
+            <!-- ROW 1: SINGLE -->
+            <button id="btn-mode-single-orig" class="mode-card single-orig-mode" type="button">
+              <div class="mode-tag single-tag">SINGLE</div>
+              <div class="mode-title-row">
+                <span class="mode-icon">🤖</span>
+                <span class="mode-name">ORIGINAL</span>
+              </div>
+              <div class="mode-sub">10 STAGES · BO3</div>
+            </button>
 
-          <!-- MULTI PLAY -->
-          <button id="btn-mode-multi" class="mode-card multi-mode" type="button">
-            <div class="mode-art">🌐</div>
-            <div class="mode-name">MULTI</div>
-            <div class="mode-sub">LOBBY</div>
-            <div class="mode-go multi-go">JOIN ▶</div>
+            <button id="btn-mode-single-item" class="mode-card single-item-mode" type="button">
+              <div class="mode-tag item-tag">SINGLE</div>
+              <div class="mode-title-row">
+                <span class="mode-icon">💣</span>
+                <span class="mode-name">ITEM WAR</span>
+              </div>
+              <div class="mode-sub">LAKES · BOMBS</div>
+            </button>
+
+            <!-- ROW 2: MULTI -->
+            <button id="btn-mode-multi-orig" class="mode-card multi-orig-mode" type="button">
+              <div class="mode-tag multi-tag">MULTI</div>
+              <div class="mode-title-row">
+                <span class="mode-icon">🌐</span>
+                <span class="mode-name">ORIGINAL</span>
+              </div>
+              <div class="mode-sub">ONLINE LOBBY</div>
+            </button>
+
+            <button id="btn-mode-multi-item" class="mode-card multi-item-mode" type="button">
+              <div class="mode-tag item-multi-tag">MULTI</div>
+              <div class="mode-title-row">
+                <span class="mode-icon">💥</span>
+                <span class="mode-name">ITEM WAR</span>
+              </div>
+              <div class="mode-sub">ONLINE BATTLE</div>
+            </button>
+          </div>
+
+          <!-- ROW 3: GAME RULES -->
+          <button id="btn-open-rules" class="btn-game-rules" type="button">
+            📖 GAME RULES
           </button>
         </div>
       </div>
@@ -121,6 +150,10 @@
 
       <div class="lobby-content">
         <div class="create-room-row">
+          <select id="select-room-mode" class="room-mode-select">
+            <option value="original">ORIGINAL</option>
+            <option value="item">ITEM WAR 💣</option>
+          </select>
           <input id="input-room-title" type="text" maxlength="18" class="room-input" placeholder="ROOM NAME..." />
           <button id="btn-create-room" class="btn-create" type="button">＋ CREATE</button>
         </div>
@@ -235,6 +268,60 @@
     </div>
   </div>
 
-  <script src="game.js?v=8"></script>
+  <!-- ==========================================
+       GAME RULES MODAL (Easy & Concise English)
+       ========================================== -->
+  <div id="rules-modal" class="modal-backdrop center-modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card rules-card">
+      <div class="modal-badge win">RULES &amp; GUIDE</div>
+      <h2 class="modal-title">HOW TO PLAY</h2>
+
+      <div class="rules-scroll-body">
+        <!-- 1. Original Mode -->
+        <div class="rule-block">
+          <div class="rule-block-title">
+            <span class="rule-tag orig">ORIGINAL MODE</span>
+            <span>Standard Gomoku</span>
+          </div>
+          <ul class="rule-list">
+            <li><strong>Objective:</strong> Be the first player to form an unbroken line of <strong>5 stones</strong> horizontally, vertically, or diagonally.</li>
+            <li><strong>Match Format:</strong> Best of 3 rounds (First to 2 wins takes the series).</li>
+            <li><strong>Turn Timer:</strong> <strong>30 seconds</strong> per move. If time runs out, a stone is auto-placed randomly.</li>
+          </ul>
+        </div>
+
+        <!-- 2. Item War Mode -->
+        <div class="rule-block">
+          <div class="rule-block-title">
+            <span class="rule-tag item">ITEM WAR MODE</span>
+            <span>Obstacles &amp; Hidden Bombs</span>
+          </div>
+          <ul class="rule-list">
+            <li><span class="rule-emoji">🌊🏔️</span> <strong>3 Nature Obstacles (Lakes &amp; Mountains):</strong> Placed randomly at match start. <em>No stones can ever be placed on lakes or mountains!</em></li>
+            <li><span class="rule-emoji">💣</span> <strong>2 Hidden Bombs:</strong> Inconspicuously hidden beneath empty board points. They look like normal empty spots until stepped on!</li>
+            <li><span class="rule-emoji">💥</span> <strong>Explosion &amp; Destruction:</strong> Placing a stone on a bomb detonates it! All stones in a <strong>5-cell cross</strong> (center + up, down, left, right) are destroyed immediately!</li>
+            <li><span class="rule-emoji">🌋</span> <strong>Permanent Ruins:</strong> The 5 blast cells turn into charred debris craters. <em>Neither player can place stones on ruins for the rest of the game!</em></li>
+          </ul>
+        </div>
+
+        <!-- 3. Ranks & Badges -->
+        <div class="rule-block">
+          <div class="rule-block-title">
+            <span class="rule-tag badge-tag-rule">RANK BADGES</span>
+            <span>Single Play Milestones</span>
+          </div>
+          <p class="rule-text-sm">
+            Reach Stage 3 (⭐), Stage 5 (⭐⭐), Stage 8 (⭐⭐⭐), and conquer Stage 10 for the legendary Diamond Master (💎) mark! Badges persist permanently.
+          </p>
+        </div>
+      </div>
+
+      <div class="modal-btn-row">
+        <button id="btn-close-rules" class="btn-modal-primary" type="button">✕ CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js?v=9"></script>
 </body>
 </html>
