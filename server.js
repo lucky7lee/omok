@@ -442,7 +442,7 @@ function startRoomRematchTimer(room) {
       sendJson(p, {
         type: 'opponent_left',
         awardedWin: false,
-        message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+        message: 'Rematch was not selected within 30s. Returning to lobby.'
       });
       sendJson(p, { type: 'left_room', rooms: getPublicRoomList() });
     }
@@ -968,15 +968,15 @@ function leaveCurrentRoom(client) {
         type: 'opponent_left',
         awardedWin: true,
         meStats: survivor.stats,
-        message: '상대방이 나가서 1승을 획득했습니다! (OPPONENT LEFT +1 WIN)'
+        message: 'Opponent left the match! +1 Win awarded.'
       });
     } else if (wasFinished || isHostLeaving) {
       sendJson(survivor, {
         type: 'opponent_left',
         awardedWin: false,
         message: wasFinished
-          ? '상대방이 나가서 대기실로 이동합니다.'
-          : '방장이 방을 나가 대기실로 이동합니다.'
+          ? 'Opponent left. Returning to lobby.'
+          : 'Host left the room. Returning to lobby.'
       });
     }
     sendJson(survivor, { type: 'left_room', rooms: getPublicRoomList() });

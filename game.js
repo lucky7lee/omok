@@ -14,16 +14,16 @@ const STAR_POINTS = [
 ];
 
 const AI_STAGES = [
-  { level: 1, name: '초보 목수', randChance: 0.45, topK: 5, depth: 1 },
-  { level: 2, name: '견습 기사', randChance: 0.28, topK: 4, depth: 1 },
-  { level: 3, name: '도장 수련생', randChance: 0.14, topK: 3, depth: 1 },
-  { level: 4, name: '바둑돌 수호자', randChance: 0.05, topK: 2, depth: 1 },
-  { level: 5, name: '철벽 전략가', randChance: 0, topK: 1, depth: 1 },
-  { level: 6, name: '백전노장', randChance: 0, topK: 6, depth: 2 },
-  { level: 7, name: '그림자 고수', randChance: 0, topK: 8, depth: 2 },
-  { level: 8, name: '천하제일 검객', randChance: 0, topK: 10, depth: 2 },
-  { level: 9, name: '불멸의 마스터', randChance: 0, topK: 12, depth: 2 },
-  { level: 10, name: '절대지존 AI', randChance: 0, topK: 14, depth: 2 }
+  { level: 1, name: 'Novice Apprentice', randChance: 0.45, topK: 5, depth: 1 },
+  { level: 2, name: 'Junior Tactician', randChance: 0.28, topK: 4, depth: 1 },
+  { level: 3, name: 'Skilled Duelist', randChance: 0.14, topK: 3, depth: 1 },
+  { level: 4, name: 'Stone Guardian', randChance: 0.05, topK: 2, depth: 1 },
+  { level: 5, name: 'Iron Strategist', randChance: 0, topK: 1, depth: 1 },
+  { level: 6, name: 'Battle Veteran', randChance: 0, topK: 6, depth: 2 },
+  { level: 7, name: 'Shadow Master', randChance: 0, topK: 8, depth: 2 },
+  { level: 8, name: 'Supreme Blademaster', randChance: 0, topK: 10, depth: 2 },
+  { level: 9, name: 'Immortal Grandmaster', randChance: 0, topK: 12, depth: 2 },
+  { level: 10, name: 'Almighty God AI', randChance: 0, topK: 14, depth: 2 }
 ];
 
 const state = {
@@ -323,7 +323,7 @@ function getAudioContext() {
   return audioCtx;
 }
 
-// Crisp wooden board + stone clack sound ("착!")
+// Crisp wooden board + stone clack sound
 function playStonePlaceSound(isBlack = true) {
   if (!state.soundEnabled) return;
   const ctx = getAudioContext();
@@ -623,19 +623,19 @@ function updateBo3Scoreboard() {
     state.mode === 'single'
       ? `STAGE ${state.singleStage}/10 · ${modeTag}`
       : `MULTI · ${modeTag}`;
-  roundTagEl.textContent = `R${s.round} (${s.myWins}승 ${s.oppWins}패${s.draws > 0 ? ` ${s.draws}무` : ''})`;
+  roundTagEl.textContent = `R${s.round} (${s.myWins}W - ${s.oppWins}L${s.draws > 0 ? ` - ${s.draws}D` : ''})`;
 }
 
-function formatSeriesKorean(s) {
+function formatSeriesScore(s) {
   const w = s.myWins || 0;
   const l = s.oppWins || 0;
   const d = s.draws || 0;
   const parts = [];
-  if (w > 0) parts.push(`${w}승`);
-  if (l > 0) parts.push(`${l}패`);
-  if (d > 0) parts.push(`${d}무`);
-  if (parts.length === 0) return '0승 0패!';
-  return `${parts.join(' ')}!`;
+  if (w > 0) parts.push(`${w} WIN${w > 1 ? 'S' : ''}`);
+  if (l > 0) parts.push(`${l} LOSS${l > 1 ? 'ES' : ''}`);
+  if (d > 0) parts.push(`${d} DRAW${d > 1 ? 'S' : ''}`);
+  if (parts.length === 0) return '0 WIN 0 LOSS';
+  return parts.join(' · ');
 }
 
 function playRoundTransitionOverlay(roundResult, seriesSnapshot, onComplete) {
@@ -659,10 +659,10 @@ function playRoundTransitionOverlay(roundResult, seriesSnapshot, onComplete) {
   badge.textContent = `ROUND ${roundNum}`;
 
   const resultLabel =
-    roundResult === 'win' ? '🎉 이겼다!' : roundResult === 'lose' ? '💔 졌다!' : '🤝 비겼다!';
+    roundResult === 'win' ? '🎉 VICTORY!' : roundResult === 'lose' ? '💔 DEFEAT!' : '🤝 DRAW!';
   let sec = 3;
   main.textContent = resultLabel;
-  sub.textContent = `${sec}초 후 결과 집계...`;
+  sub.textContent = `Score summary in ${sec}s...`;
   overlay.classList.remove('hidden');
 
   let phase = 1;
@@ -670,17 +670,17 @@ function playRoundTransitionOverlay(roundResult, seriesSnapshot, onComplete) {
     sec -= 1;
     if (phase === 1) {
       if (sec > 0) {
-        sub.textContent = `${sec}초 후 결과 집계...`;
+        sub.textContent = `Score summary in ${sec}s...`;
       } else {
         phase = 2;
         sec = 3;
-        badge.textContent = '3판 2승제 현황';
-        main.textContent = formatSeriesKorean(seriesSnapshot || state.series);
-        sub.textContent = `${sec}초 후 진행...`;
+        badge.textContent = 'BO3 SERIES STATUS';
+        main.textContent = formatSeriesScore(seriesSnapshot || state.series);
+        sub.textContent = `Next round in ${sec}s...`;
       }
     } else {
       if (sec > 0) {
-        sub.textContent = `${sec}초 후 진행...`;
+        sub.textContent = `Next round in ${sec}s...`;
       } else {
         clearRoundTransitionTimers();
         state.isRoundTransition = false;
@@ -1603,27 +1603,27 @@ function finishSinglePlayRound(roundResult) {
       if (didIWinSeries) {
         if (state.singleStage >= 10) {
           checkAndUpgradeBadge(10, true);
-          showGameOverModal('win', '💎 오목 달인에 등극하였습니다! (10단계 전체 클리어)', {
-            primaryText: '🔄 1단계 재시작',
+          showGameOverModal('win', '💎 CONQUERED ALL 10 STAGES! (OMOK GRANDMASTER)', {
+            primaryText: '🔄 RESTART LV.1',
             primaryAction: () => startSinglePlayStage(1, state.gameMode),
-            secondaryText: '🏠 메인화면',
+            secondaryText: '🏠 HOME',
             secondaryAction: () => showScreen('menu'),
-            customTitle: '👑 오목 달인 등극!'
+            customTitle: '👑 OMOK MASTER!'
           });
         } else {
           const nextStage = state.singleStage + 1;
           const unlocked = checkAndUpgradeBadge(nextStage, false);
           const nextCfg = getStageConfig(nextStage);
           const badgeMsg = unlocked
-            ? ` · ${getBadgeOnly(state.bestBadgeLevel)} 마크 획득!`
+            ? ` · ${getBadgeOnly(state.bestBadgeLevel)} MARK EARNED!`
             : '';
           showGameOverModal(
             'win',
-            `STAGE ${state.singleStage} 승리! (${snapshot.myWins}승 ${snapshot.oppWins}패)${badgeMsg}`,
+            `STAGE ${state.singleStage} CLEAR! (${snapshot.myWins}W - ${snapshot.oppWins}L)${badgeMsg}`,
             {
-              primaryText: `▶ 다음 단계 (Lv.${nextStage})`,
+              primaryText: `▶ NEXT (Lv.${nextStage})`,
               primaryAction: () => startSinglePlayStage(nextStage, state.gameMode),
-              secondaryText: '🏠 메인화면',
+              secondaryText: '🏠 HOME',
               secondaryAction: () => showScreen('menu')
             }
           );
@@ -1631,11 +1631,11 @@ function finishSinglePlayRound(roundResult) {
       } else {
         showGameOverModal(
           'lose',
-          `STAGE ${state.singleStage} 패배 (${snapshot.myWins}승 ${snapshot.oppWins}패)`,
+          `STAGE ${state.singleStage} DEFEAT (${snapshot.myWins}W - ${snapshot.oppWins}L)`,
           {
-            primaryText: '🔄 1단계 재시작',
+            primaryText: '🔄 RETRY LV.1',
             primaryAction: () => startSinglePlayStage(1, state.gameMode),
-            secondaryText: '🏠 메인화면',
+            secondaryText: '🏠 HOME',
             secondaryAction: () => showScreen('menu')
           }
         );
@@ -2045,7 +2045,7 @@ function startPeerHeartbeat() {
       state.isMatchOver = true;
       state.stats.multi.me.wins += 1;
       saveStatsData();
-      alert('상대방의 연결이 끊어져 1승을 획득했습니다! (OPPONENT DISCONNECTED +1 WIN)');
+      alert('Opponent disconnected! +1 Win awarded.');
       state.oppNickname = 'OPP';
       showScreen('lobby');
       wsSend({ type: 'get_rooms' });
@@ -2106,7 +2106,7 @@ function startHostedRoomRematchTimer() {
       sendToPeer(guest.id, {
         type: 'opponent_left',
         awardedWin: false,
-        message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+        message: 'Rematch was not selected within 30s. Returning to lobby.'
       });
       sendToPeer(guest.id, { type: 'left_room', rooms: [] });
     }
@@ -2114,7 +2114,7 @@ function startHostedRoomRematchTimer() {
     handleServerMessage({
       type: 'opponent_left',
       awardedWin: false,
-      message: '30초 내에 재대결이 선택되지 않아 대기실로 이동합니다.'
+      message: 'Rematch was not selected within 30s. Returning to lobby.'
     });
     handleServerMessage({ type: 'left_room', rooms: getServerlessRoomArray() });
   }, 30000);
@@ -2526,13 +2526,13 @@ function handleHostPeerCommand(data) {
         type: 'opponent_left',
         awardedWin: true,
         meStats: hostPlayer.stats,
-        message: '상대방이 나가서 1승을 획득했습니다! (OPPONENT LEFT +1 WIN)'
+        message: 'Opponent left the match! +1 Win awarded.'
       });
     } else {
       handleServerMessage({
         type: 'opponent_left',
         awardedWin: false,
-        message: wasFinished ? '상대방이 나가서 대기실로 이동합니다.' : '상대방이 방을 나갔습니다.'
+        message: wasFinished ? 'Opponent left. Returning to lobby.' : 'Opponent left the room.'
       });
     }
     handleServerMessage({ type: 'left_room', rooms: getServerlessRoomArray() });
@@ -2651,7 +2651,7 @@ function wsSend(obj) {
               type: 'opponent_left',
               awardedWin: true,
               meStats: guest.stats,
-              message: '방장이 나가서 1승을 획득했습니다! (HOST LEFT +1 WIN)'
+              message: 'Host left the match! +1 Win awarded.'
             });
           } else {
             sendToPeer(guest.id, {
@@ -2659,8 +2659,8 @@ function wsSend(obj) {
               awardedWin: false,
               message:
                 hostedRoom.status === 'finished'
-                  ? '상대방이 나가서 대기실로 이동합니다.'
-                  : '방장이 방을 나가 대기실로 이동합니다.'
+                  ? 'Opponent left. Returning to lobby.'
+                  : 'Host left the room. Returning to lobby.'
             });
           }
           sendToPeer(guest.id, { type: 'left_room', rooms: [] });
@@ -2846,13 +2846,13 @@ function renderHostReadyOverlay() {
   let sec = state.readySecondsLeft > 0 ? state.readySecondsLeft : HOST_START_LIMIT_SEC;
 
   const updateTexts = () => {
-    title.textContent = `${formatNameWithBadge(state.oppNickname, state.oppBadgeLevel)} 입장 완료!`;
+    title.textContent = `${formatNameWithBadge(state.oppNickname, state.oppBadgeLevel)} JOINED!`;
     if (state.isHost) {
-      sub.textContent = `${sec}초 안에 시작하지 않으면 자동 시작됩니다.`;
+      sub.textContent = `Auto-starting in ${sec}s if not started.`;
       btn.classList.remove('hidden');
       btn.textContent = `▶ START GAME (${sec}s)`;
     } else {
-      sub.textContent = `방장이 게임을 시작할 때까지 대기 중... (${sec}s)`;
+      sub.textContent = `Waiting for host to start... (${sec}s)`;
       btn.classList.add('hidden');
     }
   };
@@ -2961,17 +2961,17 @@ function updateRematchModalStatus(myReq, oppReq) {
   if (primaryBtn) {
     primaryBtn.disabled = myReq;
     primaryBtn.textContent = myReq
-      ? `⏳ 대기 (${rematchSecondsLeft}s)`
-      : `🔄 재대결 (${rematchSecondsLeft}s)`;
+      ? `⏳ WAITING (${rematchSecondsLeft}s)`
+      : `🔄 REMATCH (${rematchSecondsLeft}s)`;
   }
   if (note) {
     note.classList.remove('hidden');
     if (myReq) {
-      note.textContent = `상대방의 재대결 선택을 기다리는 중... (${rematchSecondsLeft}초 후 자동 퇴장)`;
+      note.textContent = `Waiting for opponent's response... (${rematchSecondsLeft}s to exit)`;
     } else if (oppReq) {
-      note.textContent = `🔥 상대방이 재대결을 요청했습니다! (${rematchSecondsLeft}초 안에 선택)`;
+      note.textContent = `🔥 Opponent requested a rematch! (${rematchSecondsLeft}s to accept)`;
     } else {
-      note.textContent = `30초 안에 선택하지 않으면 자동으로 대기실로 이동합니다. (${rematchSecondsLeft}s)`;
+      note.textContent = `Auto-exit to lobby if not decided in ${rematchSecondsLeft}s.`;
     }
   }
 }
@@ -2996,19 +2996,19 @@ function showMultiMatchOverModal(result, seriesSnapshot) {
   const l = (seriesSnapshot && seriesSnapshot.oppWins) || state.series.oppWins || 0;
   const subText =
     result === 'win'
-      ? `3판 2승제 최종 승리! (${w}승 ${l}패)`
-      : `3판 2승제 최종 패배 (${w}승 ${l}패)`;
+      ? `BO3 Series Victory! (${w}W - ${l}L)`
+      : `BO3 Series Defeat (${w}W - ${l}L)`;
 
   rematchSecondsLeft = 30;
   showGameOverModal(result, subText, {
     keepModalOpenOnPrimary: true,
-    primaryText: `🔄 재대결 (${rematchSecondsLeft}s)`,
+    primaryText: `🔄 REMATCH (${rematchSecondsLeft}s)`,
     primaryAction: () => {
       if (rematchMyRequested) return;
       updateRematchModalStatus(true, rematchOppRequested);
       wsSend({ type: 'play_again', stats: state.stats.multi.me });
     },
-    secondaryText: '🏢 대기실',
+    secondaryText: '🏢 LOBBY',
     secondaryAction: () => {
       clearRematchCountdown();
       wsSend({ type: 'leave_room' });
@@ -3017,7 +3017,7 @@ function showMultiMatchOverModal(result, seriesSnapshot) {
       showScreen('lobby');
       wsSend({ type: 'get_rooms' });
     },
-    tertiaryText: '🏠 메인화면',
+    tertiaryText: '🏠 HOME',
     tertiaryAction: () => {
       clearRematchCountdown();
       wsSend({ type: 'leave_room' });
