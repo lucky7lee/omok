@@ -528,12 +528,11 @@ function loadSavedData() {
     }
     const savedBadge = Number(localStorage.getItem('omok_rank_badge_v1') || 0);
     state.bestBadgeLevel = Math.max(0, Math.min(4, Number.isFinite(savedBadge) ? savedBadge : 0));
-    localStorage.removeItem('omok_nickname_v1');
-    localStorage.removeItem('omok_nickname_user_v2');
+    const savedNick = (localStorage.getItem('omok_user_nickname_v1') || '').trim().slice(0, 10);
+    state.nickname = savedNick;
   } catch (e) {}
-  state.nickname = '';
   const input = document.getElementById('input-nickname');
-  if (input) input.value = '';
+  if (input) input.value = state.nickname || '';
   renderMenuRankBadge();
   updateTopScoreHeader();
 }
@@ -779,12 +778,19 @@ function syncNickname() {
   const input = document.getElementById('input-nickname');
   const clean = (input ? input.value : '').trim().slice(0, 10);
   state.nickname = clean;
-  if (input) input.value = clean;
+  if (input && input.value !== clean) input.value = clean;
   if (clean) {
+    try {
+      localStorage.setItem('omok_user_nickname_v1', clean);
+    } catch (e) {}
     const pill = document.getElementById('name-input-pill');
     const warn = document.getElementById('id-warning-msg');
     if (pill) pill.classList.remove('input-error');
     if (warn) warn.classList.add('hidden');
+  } else {
+    try {
+      localStorage.removeItem('omok_user_nickname_v1');
+    } catch (e) {}
   }
   updateTopScoreHeader();
 }
@@ -3203,14 +3209,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const nickInput = document.getElementById('input-nickname');
-  nickInput.addEventListener('input', () => {
-    if (nickInput.value.trim().length > 0) {
-      const pill = document.getElementById('name-input-pill');
-      const warn = document.getElementById('id-warning-msg');
-      if (pill) pill.classList.remove('input-error');
-      if (warn) warn.classList.add('hidden');
-    }
-  });
+  nickInput.addEventListener('input', syncNickname);
   nickInput.addEventListener('change', syncNickname);
   nickInput.addEventListener('blur', syncNickname);
 
