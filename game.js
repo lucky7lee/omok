@@ -1167,73 +1167,114 @@ function drawMountain(ctx, x, y, radius) {
   ctx.restore();
 }
 
-// Bomb Blast Crater & Ruin Debris (Charred earth, crack fissures, glowing embers)
+// Bomb Blast Crater & Ruin Debris (Vibrant Orange Magma/Crater - clearly distinct from black/white stones)
 function drawBombRuin(ctx, x, y, radius, isCenter) {
   ctx.save();
-  // Charred ground gradient
-  const blastGrad = ctx.createRadialGradient(x, y, radius * 0.15, x, y, radius * 1.15);
-  blastGrad.addColorStop(0, '#09090b');
-  blastGrad.addColorStop(0.45, '#27272a');
-  blastGrad.addColorStop(0.78, '#450a0a');
-  blastGrad.addColorStop(1, 'rgba(69, 10, 10, 0)');
 
-  ctx.fillStyle = blastGrad;
+  // Outer glowing orange heat aura
+  const outerGlow = ctx.createRadialGradient(x, y, radius * 0.2, x, y, radius * 1.25);
+  outerGlow.addColorStop(0, 'rgba(249, 115, 22, 0.55)');
+  outerGlow.addColorStop(0.65, 'rgba(234, 88, 12, 0.28)');
+  outerGlow.addColorStop(1, 'rgba(194, 65, 12, 0)');
+  ctx.fillStyle = outerGlow;
   ctx.beginPath();
-  ctx.arc(x, y, radius * 1.15, 0, Math.PI * 2);
+  ctx.arc(x, y, radius * 1.25, 0, Math.PI * 2);
   ctx.fill();
 
-  // Blast crack lines
-  ctx.strokeStyle = '#18181b';
-  ctx.lineWidth = 1.4;
-  const angles = [0.2, 0.85, 1.45, 2.15, 2.85, 3.65, 4.35, 5.25];
+  // Main fiery orange volcanic crater base
+  const craterGrad = ctx.createRadialGradient(
+    x - radius * 0.2,
+    y - radius * 0.2,
+    radius * 0.1,
+    x,
+    y,
+    radius * 0.95
+  );
+  craterGrad.addColorStop(0, '#fdba74'); // bright warm peach/orange highlight
+  craterGrad.addColorStop(0.35, '#ea580c'); // rich vibrant flame orange
+  craterGrad.addColorStop(0.75, '#c2410c'); // burnt volcanic orange
+  craterGrad.addColorStop(1, '#9a3412'); // deep reddish amber rim
+
+  ctx.shadowColor = 'rgba(234, 88, 12, 0.6)';
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = craterGrad;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.92, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Outer crater border in vivid flame orange
+  ctx.strokeStyle = '#ea580c';
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  // Magma fissure crack lines in glowing gold/yellow
+  ctx.strokeStyle = '#fef08a';
+  ctx.lineWidth = 1.5;
+  const angles = [0.35, 1.15, 1.95, 2.75, 3.55, 4.35, 5.15, 5.95];
   for (const a of angles) {
     ctx.beginPath();
     ctx.moveTo(x, y);
-    const mx = x + Math.cos(a) * (radius * 0.65);
-    const my = y + Math.sin(a) * (radius * 0.65);
-    const ex = x + Math.cos(a + 0.15) * (radius * 1.05);
-    const ey = y + Math.sin(a + 0.15) * (radius * 1.05);
+    const mx = x + Math.cos(a) * (radius * 0.5);
+    const my = y + Math.sin(a) * (radius * 0.5);
+    const ex = x + Math.cos(a + 0.2) * (radius * 0.88);
+    const ey = y + Math.sin(a + 0.2) * (radius * 0.88);
     ctx.lineTo(mx, my);
     ctx.lineTo(ex, ey);
     ctx.stroke();
   }
 
-  // Debris rock fragments
-  ctx.fillStyle = '#3f3f46';
+  // Debris chunks & charred terra cotta rock fragments
+  ctx.fillStyle = '#7c2d12';
   ctx.beginPath();
-  ctx.arc(x - radius * 0.4, y - radius * 0.3, radius * 0.2, 0, Math.PI * 2);
+  ctx.arc(x - radius * 0.42, y - radius * 0.28, radius * 0.16, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
-  ctx.arc(x + radius * 0.35, y + radius * 0.35, radius * 0.18, 0, Math.PI * 2);
+  ctx.arc(x + radius * 0.38, y + radius * 0.32, radius * 0.14, 0, Math.PI * 2);
   ctx.fill();
 
-  // Glowing hot embers
-  ctx.fillStyle = '#ea580c';
+  // Intense yellow-orange glowing hot spots
+  ctx.fillStyle = '#fde047';
   ctx.beginPath();
-  ctx.arc(x + radius * 0.25, y - radius * 0.3, radius * 0.08, 0, Math.PI * 2);
+  ctx.arc(x + radius * 0.25, y - radius * 0.35, radius * 0.1, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#f59e0b';
   ctx.beginPath();
-  ctx.arc(x - radius * 0.25, y + radius * 0.25, radius * 0.07, 0, Math.PI * 2);
+  ctx.arc(x - radius * 0.3, y + radius * 0.28, radius * 0.09, 0, Math.PI * 2);
   ctx.fill();
 
   if (isCenter) {
-    // Deep center crater hole
-    ctx.fillStyle = '#000000';
+    // Center epicenter: bright glowing orange-gold core with hazard flame ring
+    const coreGrad = ctx.createRadialGradient(x, y, 0, x, y, radius * 0.45);
+    coreGrad.addColorStop(0, '#fef08a');
+    coreGrad.addColorStop(0.5, '#f97316');
+    coreGrad.addColorStop(1, '#991b1b');
+
+    ctx.fillStyle = coreGrad;
     ctx.beginPath();
-    ctx.arc(x, y, radius * 0.38, 0, Math.PI * 2);
+    ctx.arc(x, y, radius * 0.45, 0, Math.PI * 2);
     ctx.fill();
 
-    // Metallic bomb shell shard
-    ctx.fillStyle = '#71717a';
-    ctx.strokeStyle = '#27272a';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#ffedd5';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    // Epicenter inner blast cross mark
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.moveTo(x - radius * 0.15, y - radius * 0.25);
-    ctx.lineTo(x + radius * 0.2, y - radius * 0.15);
-    ctx.lineTo(x + radius * 0.05, y + radius * 0.2);
-    ctx.closePath();
+    ctx.moveTo(x - radius * 0.22, y);
+    ctx.lineTo(x + radius * 0.22, y);
+    ctx.moveTo(x, y - radius * 0.22);
+    ctx.lineTo(x, y + radius * 0.22);
+    ctx.stroke();
+  } else {
+    // Non-center rubble crater core
+    ctx.fillStyle = '#7c2d12';
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.28, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 1.2;
     ctx.stroke();
   }
 
@@ -1563,7 +1604,7 @@ function finishSinglePlayRound(roundResult) {
         if (state.singleStage >= 10) {
           checkAndUpgradeBadge(10, true);
           showGameOverModal('win', '💎 오목 달인에 등극하였습니다! (10단계 전체 클리어)', {
-            primaryText: '🔄 1단계부터',
+            primaryText: '🔄 1단계 재시작',
             primaryAction: () => startSinglePlayStage(1, state.gameMode),
             secondaryText: '🏠 메인화면',
             secondaryAction: () => showScreen('menu'),
@@ -1580,7 +1621,7 @@ function finishSinglePlayRound(roundResult) {
             'win',
             `STAGE ${state.singleStage} 승리! (${snapshot.myWins}승 ${snapshot.oppWins}패)${badgeMsg}`,
             {
-              primaryText: `▶ 다음 단계 (Lv.${nextStage} ${nextCfg.name})`,
+              primaryText: `▶ 다음 단계 (Lv.${nextStage})`,
               primaryAction: () => startSinglePlayStage(nextStage, state.gameMode),
               secondaryText: '🏠 메인화면',
               secondaryAction: () => showScreen('menu')
@@ -1592,7 +1633,7 @@ function finishSinglePlayRound(roundResult) {
           'lose',
           `STAGE ${state.singleStage} 패배 (${snapshot.myWins}승 ${snapshot.oppWins}패)`,
           {
-            primaryText: '🔄 1단계부터 다시 시작',
+            primaryText: '🔄 1단계 재시작',
             primaryAction: () => startSinglePlayStage(1, state.gameMode),
             secondaryText: '🏠 메인화면',
             secondaryAction: () => showScreen('menu')
@@ -2920,7 +2961,7 @@ function updateRematchModalStatus(myReq, oppReq) {
   if (primaryBtn) {
     primaryBtn.disabled = myReq;
     primaryBtn.textContent = myReq
-      ? `⏳ 대기 중 (${rematchSecondsLeft}s)`
+      ? `⏳ 대기 (${rematchSecondsLeft}s)`
       : `🔄 재대결 (${rematchSecondsLeft}s)`;
   }
   if (note) {
