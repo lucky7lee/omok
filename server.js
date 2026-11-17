@@ -368,11 +368,15 @@ function generateItemWarObstacles(board) {
     }
   }
   const chosen = [];
-  for (let i = 0; i < 3 && emptyCoords.length > 0; i++) {
+  for (let i = 0; i < 5 && emptyCoords.length > 0; i++) {
     const idx = Math.floor(Math.random() * emptyCoords.length);
     chosen.push(emptyCoords.splice(idx, 1)[0]);
   }
-  const types = Math.random() < 0.5 ? [3, 3, 4] : [3, 4, 4];
+  const types = Math.random() < 0.5 ? [3, 3, 3, 4, 4] : [3, 3, 4, 4, 4];
+  for (let i = types.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
   chosen.forEach((spot, i) => {
     board[spot.r][spot.c] = types[i];
   });
@@ -380,16 +384,25 @@ function generateItemWarObstacles(board) {
 }
 
 function generateItemWarBombs(board) {
-  const emptyCoords = [];
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] === 0) emptyCoords.push({ r, c });
+  const centerR = 7;
+  const centerC = 7;
+  const maxOffset = 5;
+  const candidateCoords = [];
+
+  for (let r = centerR - maxOffset; r <= centerR + maxOffset; r++) {
+    for (let c = centerC - maxOffset; c <= centerC + maxOffset; c++) {
+      if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+        if (board[r][c] === 0) {
+          candidateCoords.push({ r, c });
+        }
+      }
     }
   }
+
   const bombs = [];
-  for (let i = 0; i < 2 && emptyCoords.length > 0; i++) {
-    const idx = Math.floor(Math.random() * emptyCoords.length);
-    bombs.push(emptyCoords.splice(idx, 1)[0]);
+  for (let i = 0; i < 2 && candidateCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * candidateCoords.length);
+    bombs.push(candidateCoords.splice(idx, 1)[0]);
   }
   return bombs;
 }

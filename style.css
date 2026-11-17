@@ -17,6 +17,7 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  -webkit-tap-highlight-color: transparent !important;
 }
 
 html, body {
@@ -27,6 +28,8 @@ html, body {
   color: var(--text-dark);
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none !important;
+  -webkit-tap-highlight-color: transparent !important;
   overflow: hidden;
 }
 
@@ -217,12 +220,6 @@ button {
 .icon-tool-btn.sound-on {
   border-color: #38bdf8;
   color: #38bdf8;
-}
-
-.icon-tool-btn.install-chip {
-  background: linear-gradient(135deg, #f59e0b, #ea580c);
-  border-color: #fbbf24;
-  color: #ffffff;
 }
 
 /* ==========================================
@@ -792,6 +789,14 @@ button {
   align-items: center;
   overflow: hidden;
   position: relative;
+  touch-action: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .board-wrapper.shake-board {
@@ -809,7 +814,14 @@ button {
   width: 100%;
   height: 100%;
   display: block;
-  touch-action: manipulation;
+  touch-action: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   cursor: pointer;
 }
 
@@ -921,33 +933,6 @@ button {
   background: #f1f5f9;
   border: 1.5px solid #cbd5e1;
   border-radius: 10px;
-}
-
-.install-icon-box {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 8px;
-}
-
-.install-icon-img {
-  width: 78px;
-  height: 78px;
-  border-radius: 20px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.3);
-  border: 2px solid #ffffff;
-}
-
-.install-guide {
-  background: #eff6ff;
-  border: 1px solid #93c5fd;
-  border-radius: 10px;
-  padding: 10px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #1e3a8a;
-  text-align: left;
-  line-height: 1.45;
-  margin-bottom: 12px;
 }
 
 /* Rules Modal */

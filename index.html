@@ -13,7 +13,7 @@
   <link rel="Shortcut Icon" href="favicon.ico" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <title>OMOK - Single &amp; Multi</title>
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 </head>
 <body>
   <div class="game-container">
@@ -47,7 +47,6 @@
         <div class="tool-btn-row">
           <button id="btn-sound-toggle" class="icon-tool-btn sound-on" type="button" title="Sound">🔊</button>
           <button id="btn-reset-stats" class="icon-tool-btn" type="button" title="Reset Stats">↺</button>
-          <button id="btn-open-install" class="icon-tool-btn install-chip hidden" type="button" title="Install App">📲</button>
         </div>
       </div>
 
@@ -246,29 +245,6 @@
   </div>
 
   <!-- ==========================================
-       FIRST VISIT DESKTOP / HOME SCREEN SHORTCUT MODAL
-       ========================================== -->
-  <div id="install-modal" class="modal-backdrop center-modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-card install-card">
-      <div class="install-icon-box">
-        <img src="icon-192.png" onerror="this.onerror=null;this.src='icon.svg';" alt="OMOK" class="install-icon-img" />
-      </div>
-      <div class="modal-badge win">SHORTCUT</div>
-      <h2 class="modal-title">INSTALL OMOK ICON?</h2>
-      <p id="install-desc" class="modal-sub">
-        Add the pretty OMOK shortcut icon to your Windows Desktop or Android Home Screen?
-      </p>
-
-      <div id="install-guide-box" class="install-guide hidden"></div>
-
-      <div class="modal-btn-row">
-        <button id="btn-install-confirm" class="btn-modal-primary" type="button">✨ INSTALL</button>
-        <button id="btn-install-later" class="btn-modal-secondary" type="button">LATER</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ==========================================
        GAME RULES MODAL (Easy & Concise English)
        ========================================== -->
   <div id="rules-modal" class="modal-backdrop center-modal hidden" role="dialog" aria-modal="true">
@@ -297,8 +273,8 @@
             <span>Obstacles &amp; Hidden Bombs</span>
           </div>
           <ul class="rule-list">
-            <li><span class="rule-emoji">🌊🏔️</span> <strong>3 Nature Obstacles (Lakes &amp; Mountains):</strong> Placed randomly at match start. <em>No stones can ever be placed on lakes or mountains!</em></li>
-            <li><span class="rule-emoji">💣</span> <strong>2 Hidden Bombs:</strong> Inconspicuously hidden beneath empty board points. They look like normal empty spots until stepped on!</li>
+            <li><span class="rule-emoji">🌊🏔️</span> <strong>5 Nature Obstacles (Lakes &amp; Mountains):</strong> Placed randomly at match start. <em>No stones can ever be placed on lakes or mountains!</em></li>
+            <li><span class="rule-emoji">💣</span> <strong>2 Hidden Bombs:</strong> Inconspicuously hidden within 5 cells of the board center (7, 7). They look like normal empty spots until stepped on!</li>
             <li><span class="rule-emoji">💥</span> <strong>Explosion &amp; Destruction:</strong> Placing a stone on a bomb detonates it! All stones in a <strong>5-cell cross</strong> (center + up, down, left, right) are destroyed immediately!</li>
             <li><span class="rule-emoji">🌋</span> <strong>Permanent Ruins:</strong> The 5 blast cells turn into charred debris craters. <em>Neither player can place stones on ruins for the rest of the game!</em></li>
           </ul>
@@ -322,6 +298,6 @@
     </div>
   </div>
 
-  <script src="game.js?v=9"></script>
+  <script src="game.js?v=10"></script>
 </body>
 </html>

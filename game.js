@@ -173,11 +173,15 @@ function generateItemWarObstacles(board) {
     }
   }
   const chosen = [];
-  for (let i = 0; i < 3 && emptyCoords.length > 0; i++) {
+  for (let i = 0; i < 5 && emptyCoords.length > 0; i++) {
     const idx = Math.floor(Math.random() * emptyCoords.length);
     chosen.push(emptyCoords.splice(idx, 1)[0]);
   }
-  const types = Math.random() < 0.5 ? [3, 3, 4] : [3, 4, 4];
+  const types = Math.random() < 0.5 ? [3, 3, 3, 4, 4] : [3, 3, 4, 4, 4];
+  for (let i = types.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
   chosen.forEach((spot, i) => {
     board[spot.r][spot.c] = types[i];
   });
@@ -185,16 +189,25 @@ function generateItemWarObstacles(board) {
 }
 
 function generateItemWarBombs(board) {
-  const emptyCoords = [];
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] === 0) emptyCoords.push({ r, c });
+  const centerR = 7;
+  const centerC = 7;
+  const maxOffset = 5;
+  const candidateCoords = [];
+
+  for (let r = centerR - maxOffset; r <= centerR + maxOffset; r++) {
+    for (let c = centerC - maxOffset; c <= centerC + maxOffset; c++) {
+      if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+        if (board[r][c] === 0) {
+          candidateCoords.push({ r, c });
+        }
+      }
     }
   }
+
   const bombs = [];
-  for (let i = 0; i < 2 && emptyCoords.length > 0; i++) {
-    const idx = Math.floor(Math.random() * emptyCoords.length);
-    bombs.push(emptyCoords.splice(idx, 1)[0]);
+  for (let i = 0; i < 2 && candidateCoords.length > 0; i++) {
+    const idx = Math.floor(Math.random() * candidateCoords.length);
+    bombs.push(candidateCoords.splice(idx, 1)[0]);
   }
   return bombs;
 }
@@ -810,51 +823,67 @@ function getBoardMetrics(canvas) {
   return { size, pad, step };
 }
 
+let offscreenCanvas = null;
+let offscreenCtx = null;
+
+function getOffscreenBuffer(size) {
+  if (!offscreenCanvas) {
+    offscreenCanvas = document.createElement('canvas');
+  }
+  if (offscreenCanvas.width !== size || offscreenCanvas.height !== size) {
+    offscreenCanvas.width = size;
+    offscreenCanvas.height = size;
+    offscreenCtx = offscreenCanvas.getContext('2d');
+  }
+  return { offCanvas: offscreenCanvas, offCtx: offscreenCtx };
+}
+
 function drawOmokBoard() {
   const canvas = document.getElementById('omok-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const { size, pad, step } = getBoardMetrics(canvas);
 
-  ctx.clearRect(0, 0, size, size);
+  const { offCanvas, offCtx } = getOffscreenBuffer(size);
+  offCtx.clearRect(0, 0, size, size);
 
   // Subtle wood texture lines
-  ctx.save();
-  ctx.strokeStyle = 'rgba(120, 53, 15, 0.06)';
-  ctx.lineWidth = 2;
+  offCtx.save();
+  offCtx.strokeStyle = 'rgba(120, 53, 15, 0.06)';
+  offCtx.lineWidth = 2;
   for (let y = 8; y < size; y += 14) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.bezierCurveTo(size * 0.3, y + 4, size * 0.7, y - 4, size, y + 2);
-    ctx.stroke();
+    offCtx.beginPath();
+    offCtx.moveTo(0, y);
+    offCtx.bezierCurveTo(size * 0.3, y + 4, size * 0.7, y - 4, size, y + 2);
+    offCtx.stroke();
   }
-  ctx.restore();
+  offCtx.restore();
 
   // Grid lines
-  ctx.strokeStyle = '#5c2d0c';
-  ctx.lineWidth = 1.8;
+  offCtx.strokeStyle = '#5c2d0c';
+  offCtx.lineWidth = 1.8;
   for (let i = 0; i < BOARD_SIZE; i++) {
     const pos = pad + i * step;
     // Horizontal
-    ctx.beginPath();
-    ctx.moveTo(pad, pos);
-    ctx.lineTo(size - pad, pos);
-    ctx.stroke();
+    offCtx.beginPath();
+    offCtx.moveTo(pad, pos);
+    offCtx.lineTo(size - pad, pos);
+    offCtx.stroke();
     // Vertical
-    ctx.beginPath();
-    ctx.moveTo(pos, pad);
-    ctx.lineTo(pos, size - pad);
-    ctx.stroke();
+    offCtx.beginPath();
+    offCtx.moveTo(pos, pad);
+    offCtx.lineTo(pos, size - pad);
+    offCtx.stroke();
   }
 
   // Star points (Hoshi)
-  ctx.fillStyle = '#4a2106';
+  offCtx.fillStyle = '#4a2106';
   for (const [sr, sc] of STAR_POINTS) {
     const sx = pad + sc * step;
     const sy = pad + sr * step;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 4.2, 0, Math.PI * 2);
-    ctx.fill();
+    offCtx.beginPath();
+    offCtx.arc(sx, sy, 4.2, 0, Math.PI * 2);
+    offCtx.fill();
   }
 
   // Hover preview stone (desktop cursor preview)
@@ -868,23 +897,23 @@ function drawOmokBoard() {
     const hx = pad + c * step;
     const hy = pad + r * step;
     if (state.board[r][c] === 0) {
-      ctx.save();
-      ctx.globalAlpha = 0.38;
-      drawSingleStone(ctx, hx, hy, step * 0.44, state.myColor);
-      ctx.restore();
+      offCtx.save();
+      offCtx.globalAlpha = 0.38;
+      drawSingleStone(offCtx, hx, hy, step * 0.44, state.myColor);
+      offCtx.restore();
     } else {
       // Lake, Mountain, Ruin, or Occupied: Blocked Indicator
-      ctx.save();
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.72)';
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.arc(hx, hy, step * 0.38, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(hx - step * 0.26, hy - step * 0.26);
-      ctx.lineTo(hx + step * 0.26, hy + step * 0.26);
-      ctx.stroke();
-      ctx.restore();
+      offCtx.save();
+      offCtx.strokeStyle = 'rgba(239, 68, 68, 0.72)';
+      offCtx.lineWidth = 2.4;
+      offCtx.beginPath();
+      offCtx.arc(hx, hy, step * 0.38, 0, Math.PI * 2);
+      offCtx.stroke();
+      offCtx.beginPath();
+      offCtx.moveTo(hx - step * 0.26, hy - step * 0.26);
+      offCtx.lineTo(hx + step * 0.26, hy + step * 0.26);
+      offCtx.stroke();
+      offCtx.restore();
     }
   }
 
@@ -897,16 +926,16 @@ function drawOmokBoard() {
         const x = pad + c * step;
         const y = pad + r * step;
         if (cellVal === 1 || cellVal === 2) {
-          drawSingleStone(ctx, x, y, stoneRadius, cellVal);
+          drawSingleStone(offCtx, x, y, stoneRadius, cellVal);
         } else if (cellVal === 3) {
-          drawLake(ctx, x, y, stoneRadius);
+          drawLake(offCtx, x, y, stoneRadius);
         } else if (cellVal === 4) {
-          drawMountain(ctx, x, y, stoneRadius);
+          drawMountain(offCtx, x, y, stoneRadius);
         } else if (cellVal === 5) {
           const isCenter =
             Array.isArray(state.bombCenters) &&
             state.bombCenters.some((b) => b.r === r && b.c === c);
-          drawBombRuin(ctx, x, y, stoneRadius, isCenter);
+          drawBombRuin(offCtx, x, y, stoneRadius, isCenter);
         }
       }
     }
@@ -916,15 +945,15 @@ function drawOmokBoard() {
   if (state.lastMove) {
     const lx = pad + state.lastMove.c * step;
     const ly = pad + state.lastMove.r * step;
-    ctx.save();
-    ctx.fillStyle = state.lastMove.color === 1 ? '#38bdf8' : '#e11d48';
-    ctx.beginPath();
-    ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.restore();
+    offCtx.save();
+    offCtx.fillStyle = state.lastMove.color === 1 ? '#38bdf8' : '#e11d48';
+    offCtx.beginPath();
+    offCtx.arc(lx, ly, 4.5, 0, Math.PI * 2);
+    offCtx.fill();
+    offCtx.strokeStyle = '#ffffff';
+    offCtx.lineWidth = 1.5;
+    offCtx.stroke();
+    offCtx.restore();
   }
 
   // Winning 5-in-a-row highlight line & rings
@@ -936,28 +965,32 @@ function drawOmokBoard() {
     const x2 = pad + last[1] * step;
     const y2 = pad + last[0] * step;
 
-    ctx.save();
-    ctx.strokeStyle = '#fbbf24';
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    ctx.shadowColor = 'rgba(245, 158, 11, 0.9)';
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+    offCtx.save();
+    offCtx.strokeStyle = '#fbbf24';
+    offCtx.lineWidth = 5;
+    offCtx.lineCap = 'round';
+    offCtx.shadowColor = 'rgba(245, 158, 11, 0.9)';
+    offCtx.shadowBlur = 12;
+    offCtx.beginPath();
+    offCtx.moveTo(x1, y1);
+    offCtx.lineTo(x2, y2);
+    offCtx.stroke();
 
     for (const [wr, wc] of state.winLine) {
       const wx = pad + wc * step;
       const wy = pad + wr * step;
-      ctx.beginPath();
-      ctx.arc(wx, wy, stoneRadius * 0.92, 0, Math.PI * 2);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#fef08a';
-      ctx.stroke();
+      offCtx.beginPath();
+      offCtx.arc(wx, wy, stoneRadius * 0.92, 0, Math.PI * 2);
+      offCtx.lineWidth = 3;
+      offCtx.strokeStyle = '#fef08a';
+      offCtx.stroke();
     }
-    ctx.restore();
+    offCtx.restore();
   }
+
+  // Atomic blit to screen - zero flicker!
+  ctx.clearRect(0, 0, size, size);
+  ctx.drawImage(offCanvas, 0, 0);
 }
 
 function drawSingleStone(ctx, x, y, radius, color) {
@@ -3119,6 +3152,12 @@ function showGameOverModal(result, subtitleText, options = {}) {
 // Board Interaction & UI Event Listeners
 // ==========================================
 function handleBoardClick(e) {
+  if (e.cancelable) {
+    e.preventDefault();
+  }
+  if (document.activeElement && document.activeElement.blur && document.activeElement.tagName === 'INPUT') {
+    document.activeElement.blur();
+  }
   getAudioContext();
   if (!isPlayingTurnActive()) return;
   if (state.turnColor !== state.myColor) return;
@@ -3145,7 +3184,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('pointerdown', unlockAudio, { passive: true });
 
   const canvas = document.getElementById('omok-canvas');
-  canvas.addEventListener('pointerdown', handleBoardClick);
+  canvas.addEventListener('pointerdown', handleBoardClick, { passive: false });
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;
     const cell = getCellFromPointerEvent(e);
@@ -3374,233 +3413,8 @@ document.addEventListener('DOMContentLoaded', () => {
     saveStatsData();
   });
 
-  initShortcutAndPwaPrompt();
-});
-
-// ==========================================
-// Windows Desktop & Android Home Screen Shortcut Installer
-// - Checks if shortcut already exists on Windows Desktop or Standalone PWA
-// - If already installed, NEVER asks
-// - If not installed, asks on first visit and installs directly to Desktop / Home Screen
-// ==========================================
-let deferredInstallPrompt = null;
-let installGuideShown = false;
-
-function isRunningStandalone() {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.matchMedia('(display-mode: minimal-ui)').matches ||
-    window.navigator.standalone === true ||
-    document.referrer.includes('android-app://')
-  );
-}
-
-async function checkWindowsShortcutExistsOnServer() {
-  if (window.location.protocol === 'file:') return false;
-  try {
-    const res = await fetch('/api/shortcut-status', { cache: 'no-store' });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return Boolean(data && data.exists);
-  } catch (e) {
-    return false;
-  }
-}
-
-async function requestWindowsServerShortcutCreation() {
-  if (window.location.protocol === 'file:') return false;
-  try {
-    const res = await fetch('/api/create-shortcut', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: window.location.origin })
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return Boolean(data && data.ok);
-  } catch (e) {
-    return false;
-  }
-}
-
-async function initShortcutAndPwaPrompt() {
+  // Service Worker for offline asset caching (no install popups)
   if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
-
-  const installModal = document.getElementById('install-modal');
-  const confirmBtn = document.getElementById('btn-install-confirm');
-  const laterBtn = document.getElementById('btn-install-later');
-  const openChipBtn = document.getElementById('btn-open-install');
-  const guideBox = document.getElementById('install-guide-box');
-
-  // 1) Check Web API related installed apps
-  let relatedInstalled = false;
-  if ('getInstalledRelatedApps' in navigator) {
-    try {
-      const apps = await navigator.getInstalledRelatedApps();
-      if (apps && apps.length > 0) {
-        relatedInstalled = true;
-      }
-    } catch (e) {}
-  }
-
-  // 2) Check Windows Desktop actual file (`OMOK.lnk` / `OMOK.url`) via local server API
-  const desktopShortcutExists = await checkWindowsShortcutExistsOnServer();
-
-  if (
-    isRunningStandalone() ||
-    relatedInstalled ||
-    desktopShortcutExists ||
-    localStorage.getItem('omok_shortcut_installed_v1') === '1'
-  ) {
-    localStorage.setItem('omok_shortcut_installed_v1', '1');
-    localStorage.setItem('omok_shortcut_asked_v1', '1');
-    if (openChipBtn) openChipBtn.classList.add('hidden');
-    if (installModal) installModal.classList.add('hidden');
-    return;
-  }
-
-  if (openChipBtn) {
-    openChipBtn.classList.remove('hidden');
-  }
-
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredInstallPrompt = e;
-    if (openChipBtn && localStorage.getItem('omok_shortcut_installed_v1') !== '1') {
-      openChipBtn.classList.remove('hidden');
-    }
-  });
-
-  window.addEventListener('appinstalled', () => {
-    deferredInstallPrompt = null;
-    localStorage.setItem('omok_shortcut_installed_v1', '1');
-    localStorage.setItem('omok_shortcut_asked_v1', '1');
-    installModal.classList.add('hidden');
-    if (openChipBtn) openChipBtn.classList.add('hidden');
-  });
-
-  // Show prompt on first visit only if not already installed
-  const alreadyAsked = localStorage.getItem('omok_shortcut_asked_v1') === '1';
-  if (!alreadyAsked) {
-    localStorage.setItem('omok_shortcut_asked_v1', '1');
-    setTimeout(() => {
-      openInstallModal();
-    }, 350);
-  }
-
-  if (openChipBtn) {
-    openChipBtn.addEventListener('click', () => {
-      openInstallModal();
-    });
-  }
-
-  if (laterBtn) {
-    laterBtn.addEventListener('click', () => {
-      localStorage.setItem('omok_shortcut_asked_v1', '1');
-      installModal.classList.add('hidden');
-    });
-  }
-
-  if (confirmBtn) {
-    confirmBtn.addEventListener('click', async () => {
-      if (installGuideShown) {
-        installModal.classList.add('hidden');
-        return;
-      }
-      localStorage.setItem('omok_shortcut_asked_v1', '1');
-
-      const ua = navigator.userAgent || '';
-      const isAndroid = /Android/i.test(ua);
-      const isIOS = /iPhone|iPad|iPod/i.test(ua);
-
-      // Step 1: On Windows PC running local server, directly create the Desktop `.lnk` icon
-      if (!isAndroid && !isIOS) {
-        const createdOnDesktop = await requestWindowsServerShortcutCreation();
-        if (createdOnDesktop) {
-          localStorage.setItem('omok_shortcut_installed_v1', '1');
-          if (openChipBtn) openChipBtn.classList.add('hidden');
-
-          // Also trigger native PWA prompt if available
-          if (deferredInstallPrompt) {
-            try {
-              deferredInstallPrompt.prompt();
-              await deferredInstallPrompt.userChoice;
-            } catch (e) {}
-            deferredInstallPrompt = null;
-          }
-
-          guideBox.classList.remove('hidden');
-          guideBox.innerHTML = '✅ <strong>OMOK icon installed on your Windows Desktop!</strong>';
-          installGuideShown = true;
-          confirmBtn.textContent = 'OK';
-          return;
-        }
-      }
-
-      // Step 2: Native PWA install prompt (Android Chrome / Desktop Chrome & Edge)
-      if (deferredInstallPrompt) {
-        deferredInstallPrompt.prompt();
-        const choiceResult = await deferredInstallPrompt.userChoice;
-        deferredInstallPrompt = null;
-        if (choiceResult && choiceResult.outcome === 'accepted') {
-          localStorage.setItem('omok_shortcut_installed_v1', '1');
-          installModal.classList.add('hidden');
-          if (openChipBtn) openChipBtn.classList.add('hidden');
-          return;
-        }
-      }
-
-      // Step 3: Fallback for mobile or static hosting
-      guideBox.classList.remove('hidden');
-      if (isAndroid) {
-        guideBox.innerHTML =
-          '📱 <strong>Android Home Screen</strong><br/>' +
-          'Tap browser menu <strong>[⋮]</strong> → select <strong>[Add to Home screen]</strong> or <strong>[Install app]</strong>.';
-      } else if (isIOS) {
-        guideBox.innerHTML =
-          '📱 <strong>iPhone Home Screen</strong><br/>' +
-          'Tap <strong>[Share]</strong> → select <strong>[Add to Home Screen]</strong>.';
-      } else {
-        downloadWindowsShortcutFile();
-        localStorage.setItem('omok_shortcut_installed_v1', '1');
-        guideBox.innerHTML =
-          '💻 <strong>Shortcut Downloaded!</strong><br/>' +
-          'Place <strong>[OMOK.url]</strong> on your Desktop or click the address bar <strong>[Install App]</strong> icon.';
-      }
-      installGuideShown = true;
-      confirmBtn.textContent = 'OK';
-    });
-  }
-}
-
-function openInstallModal() {
-  const installModal = document.getElementById('install-modal');
-  const guideBox = document.getElementById('install-guide-box');
-  const confirmBtn = document.getElementById('btn-install-confirm');
-  if (!installModal) return;
-
-  installGuideShown = false;
-  guideBox.classList.add('hidden');
-  confirmBtn.textContent = '✨ INSTALL';
-  installModal.classList.remove('hidden');
-}
-
-function downloadWindowsShortcutFile() {
-  const baseHref = window.location.href.split('#')[0].split('?')[0].replace(/\/index\.html$/i, '');
-  const targetUrl = baseHref.endsWith('/') ? baseHref : `${baseHref}/`;
-  const iconUrl = `${targetUrl}favicon.ico`;
-  const content = `[InternetShortcut]\r\nURL=${targetUrl}\r\nIconFile=${iconUrl}\r\nIconIndex=0\r\n`;
-  const blob = new Blob([content], { type: 'application/internet-shortcut' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'OMOK.url';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 500);
-}
+});
