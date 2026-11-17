@@ -256,19 +256,21 @@ button {
 }
 
 .hero-logo {
-  width: 58px;
-  height: 58px;
-  border-radius: 16px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
-  border: 2.5px solid #ffffff;
+  width: min(116px, 16vh);
+  height: min(116px, 16vh);
+  border-radius: 26px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+  border: 3.5px solid #ffffff;
 }
 
 .hero-title {
-  font-size: 1.55rem;
-  font-weight: 900;
-  letter-spacing: 2px;
+  font-size: clamp(1.05rem, 4.4vw, 1.45rem);
+  font-weight: 950;
+  letter-spacing: 0.5px;
   color: #0f172a;
-  line-height: 1.05;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .hero-sub {

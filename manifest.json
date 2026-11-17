@@ -1,7 +1,7 @@
 {
-  "name": "OMOK - Single & Online Multi",
-  "short_name": "OMOK",
-  "description": "15x15 Classic Omok (Five in a Row) - Single vs AI & Online Multi Play",
+  "name": "BATTLE GOMOKU (OMOK) - Single & Online Multi",
+  "short_name": "BATTLE GOMOKU",
+  "description": "15x15 Battle Gomoku (Omok) - Single vs 10 AI Stages & Online Multi Battle",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

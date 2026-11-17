@@ -1,10 +1,10 @@
 // Service Worker for OMOK Offline Asset Caching
-const CACHE_NAME = 'omok-pwa-v14';
+const CACHE_NAME = 'omok-pwa-v15';
 const ASSETS = [
   './',
   './index.html',
-  './style.css?v=14',
-  './game.js?v=14',
+  './style.css?v=15',
+  './game.js?v=15',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
